@@ -104,6 +104,26 @@
           </button>
         </div>
       </div>
+      <div class="row grid2">
+  <div>
+    <label>GovMap X</label>
+    <input v-model="govX" placeholder="למשל 220000 או lon" />
+  </div>
+  <div>
+    <label>GovMap Y</label>
+    <input v-model="govY" placeholder="למשל 630000 או lat" />
+  </div>
+</div>
+
+<div class="row grid2">
+  <button class="btnGhost" @click="useGovmapPoint">המר לנקודה (WGS84)</button>
+  <button class="btnGhost" @click="clearGovmapPoint">נקה נקודה</button>
+</div>
+
+<div class="small" v-if="govPoint">
+  נקודה: {{ govPoint.lat.toFixed(6) }}, {{ govPoint.lng.toFixed(6) }} (מקור {{ govPoint.crs }})
+</div>
+
 
       <div class="row">
         <div class="small">סטטוס</div>
@@ -118,6 +138,7 @@
 </template>
 
 <script setup>
+  import { govmapXYToWgs84, bufferPointToWktRect } from "./utils/govmapCrs.js";
 import { computed, onMounted, ref } from "vue";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
@@ -137,7 +158,11 @@ const showFootprints = ref(true);
 
 const features = ref([]); // raw GeoJSON features
 const selectedKey = ref("");
+const govX = ref("");
+const govY = ref("");
+const govPoint = ref(null);
 
+let govMarker = null;
 let map, drawn, footprintsGroup;
 const footprintLayers = new Map(); // key -> leaflet layer
 
@@ -159,7 +184,34 @@ function formatTime(t) {
     return String(t);
   }
 }
+function useGovmapPoint() {
+  try {
+    const p = govmapXYToWgs84(govX.value, govY.value);
+    govPoint.value = p;
 
+    // שים סמן במפה
+    if (govMarker) {
+      govMarker.remove();
+      govMarker = null;
+    }
+    govMarker = L.marker([p.lat, p.lng]).addTo(map);
+    map.setView([p.lat, p.lng], Math.max(map.getZoom(), 14));
+
+    status.value = `המרה הצליחה: ${p.lat.toFixed(6)}, ${p.lng.toFixed(6)} (מקור ${p.crs})`;
+  } catch (e) {
+    status.value = `שגיאה בהמרת GovMap: ${String(e)}`;
+  }
+}
+
+function clearGovmapPoint() {
+  govPoint.value = null;
+  govX.value = "";
+  govY.value = "";
+  if (govMarker) {
+    govMarker.remove();
+    govMarker = null;
+  }
+}
 function initMap() {
   map = L.map("map", { zoomControl: true }).setView([31.5, 35.0], 7);
 
@@ -355,10 +407,19 @@ async function doSearch() {
     features.value = [];
     clearFootprints();
     status.value = "מחפש…";
-
     const layer = drawn.getLayers()[0];
-    if (!layer) throw new Error("אין AOI על המפה. צייר מלבן/פוליגון או לחץ Reset לישראל.");
-    const wkt = layerToWkt(layer);
+
+let wkt = "";
+if (layer) {
+  wkt = layerToWkt(layer);
+} else if (govPoint.value) {
+  // אם אין AOI מצויר, נחפש סביב הנקודה (300m)
+  wkt = bufferPointToWktRect(govPoint.value.lat, govPoint.value.lng, 300);
+} else {
+  throw new Error("אין AOI על המפה וגם לא הוזנה נקודת GovMap");
+}
+
+
 
     const qs = new URLSearchParams({
       dataset: "SENTINEL-1",
