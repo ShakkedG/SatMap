@@ -1,1 +1,16 @@
 
+# Node / Vite
+node_modules/
+dist/
+client/dist/
+
+# Env (לא מעלים טוקנים/סודות)
+.env
+.env.*
+!.env.example
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
