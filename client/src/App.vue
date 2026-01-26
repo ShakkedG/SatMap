@@ -212,6 +212,30 @@ function clearGovmapPoint() {
     govMarker = null;
   }
 }
+  async function fetchBuildingsOSM(bbox) {
+  // bbox: { south, west, north, east }
+  const query = `
+    [out:json][timeout:25];
+    (
+      way["building"](${bbox.south},${bbox.west},${bbox.north},${bbox.east});
+      relation["building"](${bbox.south},${bbox.west},${bbox.north},${bbox.east});
+    );
+    out body;
+    >;
+    out skel qt;
+  `;
+
+  const url = "https://overpass-api.de/api/interpreter";
+  const res = await fetch(url, {
+    method: "POST",
+    body: query,
+    headers: { "Content-Type": "text/plain;charset=UTF-8" }
+  });
+
+  if (!res.ok) throw new Error("Overpass failed: " + res.status);
+  return res.json(); // זה עדיין Overpass JSON (נמיר ל-GeoJSON)
+}
+
 function initMap() {
   map = L.map("map", { zoomControl: true }).setView([31.5, 35.0], 7);
 
