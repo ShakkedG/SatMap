@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>SatMap – Subsidence (Leaflet)</title>
+
+    <!-- Leaflet CDN -->
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      crossorigin=""
+    />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+
+    <link rel="stylesheet" href="./subsidence.css" />
+  </head>
+
+  <body>
+    <div class="app">
+      <aside class="sidebar">
+        <div class="title">SatMap</div>
+        <div class="subtitle">בדיקת שקיעה (MVP)</div>
+
+        <div class="card">
+          <label class="row">
+            <span>סף “שוקע” (mm/yr)</span>
+            <input id="threshold" type="number" value="-5" step="1" />
+          </label>
+          <button id="copyBtn" class="btn" disabled>העתק קואורדינטות</button>
+        </div>
+
+        <div class="card">
+          <div class="cardTitle">תוצאה</div>
+          <pre id="result" class="result muted">לחץ על המפה כדי לבדוק נקודה.</pre>
+        </div>
+      </aside>
+
+      <main class="mapWrap">
+        <div id="map"></div>
+      </main>
+    </div>
+
+    <script src="./subsidence.js"></script>
+  </body>
+</html>
