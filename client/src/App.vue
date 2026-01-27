@@ -1,5 +1,6 @@
 <template>
   <div class="wrap" dir="rtl">
+    
     <aside class="panel">
       <div class="head">
         <div>
@@ -15,6 +16,10 @@
           ☰
         </button>
       </div>
+      <div style="margin-top:8px;">
+  <a href="${earthUrl}" target="_blank" rel="noopener">פתח ב-Google Earth</a>
+</div>
+
 
       <div class="row grid2">
         <button class="btnGhost" :class="{ activeBtn: mode === 'search' }" @click="mode = 'search'">
@@ -210,7 +215,7 @@ const flightDirection = ref("");
 
 const q = ref("");
 const limit = ref(50);
-const showFootprints = ref(true);
+const showFootprints = ref(false);
 
 const features = ref([]); // raw GeoJSON features
 const selectedKey = ref("");
@@ -423,6 +428,7 @@ function rebuildDrawControl() {
   }
 
   const isSubs = mode.value === "subsidence";
+patchLeafletDrawReadableArea();
 
   drawControl = new L.Control.Draw({
     draw: isSubs
@@ -449,15 +455,61 @@ function rebuildDrawControl() {
 
   map.addControl(drawControl);
 }
+  function patchLeafletDrawReadableArea() {
+  if (!L?.GeometryUtil) return;
+
+  try {
+    // אם זה עובד - לא צריך תיקון
+    L.GeometryUtil.readableArea(1000, true);
+    return;
+  } catch {
+    // תיקון: החלפה למימוש "בטוח" (בלי משתנים גלובליים שזורקים שגיאה ב-ESM/strict)
+    L.GeometryUtil.readableArea = function (area, isMetric = true, precision = 2) {
+      const p = Number.isFinite(precision) ? precision : 2;
+      const a = Number(area);
+      if (!Number.isFinite(a) || a <= 0) return isMetric ? "0 מ״ר" : "0 ft²";
+
+      if (isMetric) {
+        if (a >= 1_000_000) return `${(a / 1_000_000).toFixed(p)} קמ״ר`;
+        return `${a.toFixed(p)} מ״ר`;
+      } else {
+        // אופציונלי: אם תרצה אימפריאלי
+        const ft2 = a * 10.763910416709722;
+        if (ft2 >= 27_878_400) return `${(ft2 / 27_878_400).toFixed(p)} mi²`;
+        return `${ft2.toFixed(p)} ft²`;
+      }
+    };
+  }
+}
+
 
 /** -------------------- initMap -------------------- */
 function initMap() {
-  map = L.map("map", { zoomControl: true }).setView([31.5, 35.0], 7);
+ map = L.map("map", {
+  zoomControl: true,
+  maxZoom: 22,
+}).setView([31.5, 35.0], 9); // זום התחלתי יותר קרוב
 
-  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+const osm = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+  maxZoom: 19,
+  attribution: "&copy; OpenStreetMap",
+}).addTo(map);
+
+const esri = L.tileLayer(
+  "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+  {
     maxZoom: 19,
-    attribution: "&copy; OpenStreetMap",
-  }).addTo(map);
+    attribution: "Tiles &copy; Esri",
+  }
+);
+
+// בורר שכבות
+L.control.layers(
+  { "מפה (OSM)": osm, "לוויין (Esri)": esri },
+  {},
+  { position: "topleft" }
+).addTo(map);
+
 
   drawn = new L.FeatureGroup().addTo(map);
   footprintsGroup = new L.FeatureGroup().addTo(map);
@@ -608,11 +660,12 @@ function addFootprintsToMap(geojsonFeatures) {
     { type: "FeatureCollection", features: geojsonFeatures },
     {
       // קווי מתאר דקים בלי “בלוק כחול”
-      style: () => ({
-        weight: 1,
-        opacity: 0.85,
-        fillOpacity: 0.0,
-      }),
+     style: () => ({
+  weight: 1,
+  opacity: 0.8,
+  fillOpacity: 0.0, // חשוב: בלי מילוי
+}),
+
       onEachFeature: (feature, layer) => {
         const p = feature.properties || {};
         const gid = extractGranuleId(feature);
@@ -707,6 +760,8 @@ async function doSearch() {
 
     const data = await r.json();
     const feats = data?.features || [];
+    const earthUrl = `https://earth.google.com/web/search/${item.centroid.lat},${item.centroid.lng}`;
+
 
     features.value = feats;
 
@@ -790,7 +845,8 @@ async function scanSubsidenceInRect() {
       layer.on("click", async () => {
         // זום אין אוטומטי
         try {
-          map.fitBounds(layer.getBounds(), { padding: [20, 20] });
+        map.fitBounds(layer.getBounds(), { padding: [20, 20], maxZoom: 19 });
+
         } catch {}
 
         // גובה בעבר/נוכחי (כרגע משוער)
