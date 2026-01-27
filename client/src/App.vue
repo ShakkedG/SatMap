@@ -74,7 +74,8 @@
         </div>
         <div class="toggleBox">
           <label class="chk">
-            <input type="checkbox" v-model="showFootprints" @change="applyFootprintsVisibility" />
+           <input type="checkbox" v-model="showFootprints" @change="applyFootprintsVisibility" />
+
             להציג Footprints
           </label>
         </div>
@@ -429,35 +430,38 @@ function addFootprintsToMap(geojsonFeatures) {
   clearFootprints();
 
   const gj = L.geoJSON(
-    { type: "FeatureCollection", features: geojsonFeatures },
-    {
-      style: () => ({
-        weight: 2,
-        opacity: 0.9,
-        fillOpacity: 0.08,
-      }),
-      onEachFeature: (feature, layer) => {
-        const p = feature.properties || {};
-        const gid = extractGranuleId(feature);
-        const time = p.startTime || p.start || "";
-        const key = `${gid}__${time || ""}`;
+  { type: "FeatureCollection", features: geojsonFeatures },
+  {
+    style: () => ({
+      weight: 1,
+      opacity: 0.8,
+      fillOpacity: 0.02, // או 0 לקווים בלבד
+    }),
+    onEachFeature: (feature, layer) => {
+      const p = feature.properties || {};
+      const gid = extractGranuleId(feature);
+      const time = p.startTime || p.start || "";
+      const key = `${gid}__${time || ""}`;
 
-        footprintLayers.set(key, layer);
+      footprintLayers.set(key, layer);
 
-        layer.on("click", () => {
-          setSelected(key);
-          const html = `
-            <div style="font-family: system-ui; font-size: 12px;">
-              <div style="font-weight:700; margin-bottom:6px;">${gid}</div>
-              <div>${time ? formatTime(time) : ""}</div>
-              <div>${p.flightDirection ? "כיוון: " + p.flightDirection : ""}${p.relativeOrbit ? " | מסלול: " + p.relativeOrbit : ""}</div>
-            </div>
-          `;
-          layer.bindPopup(html).openPopup();
-        });
-      },
-    }
-  );
+      layer.on("click", () => {
+        setSelected(key);
+        const html = `
+          <div style="font-family: system-ui; font-size: 12px;">
+            <div style="font-weight:700; margin-bottom:6px;">${gid}</div>
+            <div>${time ? formatTime(time) : ""}</div>
+            <div>${p.flightDirection ? "כיוון: " + p.flightDirection : ""}${
+              p.relativeOrbit ? " | מסלול: " + p.relativeOrbit : ""
+            }</div>
+          </div>
+        `;
+        layer.bindPopup(html).openPopup();
+      });
+    },
+  }
+);
+
 
   gj.eachLayer((l) => footprintsGroup.addLayer(l));
 
@@ -533,8 +537,12 @@ if (layer) {
     const data = await r.json();
     const feats = data?.features || [];
 
-    features.value = feats;
-    addFootprintsToMap(feats);
+features.value = feats;
+addFootprintsToMap(feats.slice(0, limit.value));
+
+status.value = feats.length
+  ? `נמצאו ${feats.length} סצנות. מציג על המפה ${Math.min(feats.length, limit.value)}.`
+  : "אין תוצאות.";
 
     status.value = feats.length ? `נמצאו ${feats.length} סצנות.` : "אין תוצאות.";
   } catch (e) {
