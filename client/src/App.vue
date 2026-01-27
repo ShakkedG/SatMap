@@ -5,9 +5,9 @@
         <div>
           <h3>SatMap – Sentinel-1 (ASF Search)</h3>
           <div class="small">
-            מציירים AOI על המפה (מלבן/פוליגון), בוחרים תאריכים ולוחצים “חפש”.
+            מצב חיפוש: מציירים AOI (מלבן/פוליגון), בוחרים תאריכים ולוחצים “חפש”.
             <br />
-            התוצאות מוצגות גם כרשימה וגם כ-Footprints על המפה.
+            מצב שקיעה: מציירים מלבן ואז “סרוק את המלבן” כדי למצוא בניינים שוקעים.
           </div>
         </div>
 
@@ -15,151 +15,170 @@
           ☰
         </button>
       </div>
-      <div class="row grid2">
-  <button class="btnGhost" :class="{ activeBtn: mode === 'search' }" @click="mode = 'search'">
-    חיפוש סצנות
-  </button>
-  <button class="btnGhost" :class="{ activeBtn: mode === 'subsidence' }" @click="mode = 'subsidence'">
-    בדיקת שקיעה
-  </button>
-</div>
-
-<div v-if="mode === 'search'">
 
       <div class="row grid2">
-        <div>
-          <label>התחלה</label>
-          <input type="date" v-model="start" />
-        </div>
-        <div>
-          <label>סוף</label>
-          <input type="date" v-model="end" />
-        </div>
-      </div>
-
-      <div class="row grid2">
-        <div>
-          <label>כיוון מסלול</label>
-          <select v-model="flightDirection">
-            <option value="">ללא</option>
-            <option value="ASCENDING">עולה</option>
-            <option value="DESCENDING">יורד</option>
-          </select>
-        </div>
-        <div>
-          <label>מקסימום תוצאות להצגה</label>
-          <select v-model.number="limit">
-            <option :value="25">25</option>
-            <option :value="50">50</option>
-            <option :value="100">100</option>
-          </select>
-        </div>
-      </div>
-
-      <div class="row grid2">
-        <button @click="resetIsraelAOI" class="btnGhost">Reset לישראל</button>
-        <button @click="clearAOI" class="btnGhost">נקה AOI</button>
-      </div>
-
-      <div class="row">
-        <button class="btnPrimary" @click="doSearch" :disabled="busy">
-          {{ busy ? "מחפש…" : "חפש סצנות" }}
+        <button class="btnGhost" :class="{ activeBtn: mode === 'search' }" @click="mode = 'search'">
+          חיפוש סצנות
+        </button>
+        <button class="btnGhost" :class="{ activeBtn: mode === 'subsidence' }" @click="mode = 'subsidence'">
+          בדיקת שקיעה
         </button>
       </div>
 
+      <!-- מצב חיפוש -->
+      <div v-if="mode === 'search'">
+        <div class="row grid2">
+          <div>
+            <label>התחלה</label>
+            <input type="date" v-model="start" />
+          </div>
+          <div>
+            <label>סוף</label>
+            <input type="date" v-model="end" />
+          </div>
+        </div>
+
+        <div class="row grid2">
+          <div>
+            <label>כיוון מסלול</label>
+            <select v-model="flightDirection">
+              <option value="">ללא</option>
+              <option value="ASCENDING">עולה</option>
+              <option value="DESCENDING">יורד</option>
+            </select>
+          </div>
+          <div>
+            <label>מקסימום תוצאות להצגה</label>
+            <select v-model.number="limit">
+              <option :value="25">25</option>
+              <option :value="50">50</option>
+              <option :value="100">100</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="row grid2">
+          <button @click="resetIsraelAOI" class="btnGhost">Reset לישראל</button>
+          <button @click="clearAOI" class="btnGhost">נקה AOI</button>
+        </div>
+
+        <div class="row">
+          <button class="btnPrimary" @click="doSearch" :disabled="busy">
+            {{ busy ? "מחפש…" : "חפש סצנות" }}
+          </button>
+        </div>
+
+        <div class="row grid2">
+          <div>
+            <label>סינון לפי ID</label>
+            <input v-model="q" placeholder="חפש בתוך התוצאות…" />
+          </div>
+          <div class="toggleBox">
+            <label class="chk">
+              <input type="checkbox" v-model="showFootprints" @change="applyFootprintsVisibility" />
+              להציג Footprints
+            </label>
+          </div>
+        </div>
+
+        <div class="row actions">
+          <button class="btnGhost" @click="downloadGeoJSON" :disabled="!features.length">
+            הורד GeoJSON
+          </button>
+          <button class="btnGhost" @click="downloadCSV" :disabled="!features.length">
+            הורד CSV
+          </button>
+        </div>
+
+        <div class="row">
+          <div class="small">
+            תוצאות: <b>{{ filtered.length }}</b> (מציג {{ shown.length }}).
+          </div>
+
+          <div class="list">
+            <button
+              class="card"
+              v-for="r in shown"
+              :key="r.key"
+              :class="{ active: r.key === selectedKey }"
+              @click="focusResult(r.key)"
+              title="Zoom + הדגשה במפה"
+            >
+              <div class="mono line">
+                <span class="ell">{{ r.gid }}</span>
+                <span class="pill" v-if="r.flightDirection">{{ r.flightDirection }}</span>
+              </div>
+              <div class="small line">
+                <span>{{ formatTime(r.time) }}</span>
+                <span class="muted" v-if="r.relativeOrbit"> | מסלול: {{ r.relativeOrbit }}</span>
+              </div>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- GovMap point -->
       <div class="row grid2">
         <div>
-          <label>סינון לפי ID</label>
-          <input v-model="q" placeholder="חפש בתוך התוצאות…" />
+          <label>GovMap X</label>
+          <input v-model="govX" placeholder="למשל 220000 או lon" />
         </div>
-        <div class="toggleBox">
-          <label class="chk">
-           <input type="checkbox" v-model="showFootprints" @change="applyFootprintsVisibility" />
-
-            להציג Footprints
-          </label>
+        <div>
+          <label>GovMap Y</label>
+          <input v-model="govY" placeholder="למשל 630000 או lat" />
         </div>
       </div>
 
-      <div class="row actions">
-        <button class="btnGhost" @click="downloadGeoJSON" :disabled="!features.length">
-          הורד GeoJSON
-        </button>
-        <button class="btnGhost" @click="downloadCSV" :disabled="!features.length">
-          הורד CSV
-        </button>
+      <div class="row grid2">
+        <button class="btnGhost" @click="useGovmapPoint">המר לנקודה (WGS84)</button>
+        <button class="btnGhost" @click="clearGovmapPoint">נקה נקודה</button>
       </div>
 
-      <div class="row">
+      <div class="small" v-if="govPoint">
+        נקודה: {{ govPoint.lat.toFixed(6) }}, {{ govPoint.lng.toFixed(6) }} (מקור {{ govPoint.crs }})
+      </div>
+
+      <!-- מצב שקיעה -->
+      <div class="row" v-if="mode === 'subsidence'">
         <div class="small">
-          תוצאות: <b>{{ filtered.length }}</b> (מציג {{ shown.length }}).
+          מצב שקיעה: צייר <b>מלבן</b> על המפה ואז לחץ “סרוק את המלבן”.
         </div>
 
-        <div class="list">
-          <button
-            class="card"
-            v-for="r in shown"
-            :key="r.key"
-            :class="{ active: r.key === selectedKey }"
-            @click="focusResult(r.key)"
-            title="Zoom + הדגשה במפה"
-          >
+        <div class="row actions" style="margin-top:10px;">
+          <button class="btnGhost" @click="scanSubsidenceInRect" :disabled="subsBusy">סרוק את המלבן</button>
+          <button class="btnGhost" @click="clearSubsidenceAll">נקה הכל</button>
+        </div>
+
+        <div class="row grid2" style="margin-top:10px;">
+          <div>
+            <label>סף “שוקע” (mm/yr)</label>
+            <input type="number" v-model.number="subsThreshold" step="1" />
+          </div>
+          <div class="small" style="display:flex;align-items:end;justify-content:end;">
+            בניינים שוקעים במלבן: <b style="margin-inline-start:6px;">{{ subsBuildings.length }}</b>
+          </div>
+        </div>
+
+        <div class="small" v-if="lastClick">
+          נקודה: {{ lastClick.lat.toFixed(6) }}, {{ lastClick.lng.toFixed(6) }}<br />
+          שקיעה משוערת: <b v-if="subsMmPerYear != null">{{ subsMmPerYear.toFixed(2) }}</b><span v-else>N/A</span> mm/yr<br />
+          תוצאה: <b>{{ subsResultText }}</b>
+        </div>
+
+        <div class="list" v-if="subsBuildings.length" style="margin-top:10px;">
+          <button class="card" v-for="(b, i) in subsBuildings" :key="i" @click="focusSubsBuilding(b)">
             <div class="mono line">
-              <span class="ell">{{ r.gid }}</span>
-              <span class="pill" v-if="r.flightDirection">{{ r.flightDirection }}</span>
+              <span class="ell">{{ b.name }}</span>
+              <span class="pill">שוקע</span>
             </div>
             <div class="small line">
-              <span>{{ formatTime(r.time) }}</span>
-              <span class="muted" v-if="r.relativeOrbit"> | מסלול: {{ r.relativeOrbit }}</span>
+              <span>שקיעה: {{ b.rate.toFixed(2) }} מ״מ/שנה</span>
             </div>
           </button>
         </div>
       </div>
-  </div>
-
-      <div class="row grid2">
-  <div>
-    <label>GovMap X</label>
-    <input v-model="govX" placeholder="למשל 220000 או lon" />
-  </div>
-  <div>
-    <label>GovMap Y</label>
-    <input v-model="govY" placeholder="למשל 630000 או lat" />
-  </div>
-</div>
-
-<div class="row grid2">
-  <button class="btnGhost" @click="useGovmapPoint">המר לנקודה (WGS84)</button>
-  <button class="btnGhost" @click="clearGovmapPoint">נקה נקודה</button>
-</div>
-
-<div class="small" v-if="govPoint">
-  נקודה: {{ govPoint.lat.toFixed(6) }}, {{ govPoint.lng.toFixed(6) }} (מקור {{ govPoint.crs }})
-</div>
-<div class="row" v-if="mode === 'subsidence'">
-  <div class="small">מצב שקיעה: לחץ על המפה כדי לבדוק נקודה.</div>
-
-  <div class="row grid2" style="margin-top:10px;">
-    <div>
-      <label>סף “שוקע” (mm/yr)</label>
-      <input type="number" v-model.number="subsThreshold" step="1" />
-    </div>
-  </div>
-
-  <div class="small" v-if="lastClick">
-    נקודה: {{ lastClick.lat.toFixed(6) }}, {{ lastClick.lng.toFixed(6) }}<br />
-    שקיעה (placeholder):
-<span v-if="subsMmPerYear != null">{{ subsMmPerYear.toFixed(2) }}</span>
-<span v-else>N/A</span>
-mm/yr<br />
-
-    תוצאה: <b>{{ subsResultText }}</b>
-  </div>
-</div>
-
 
       <div class="row">
-        
         <div class="small">סטטוס</div>
         <pre class="status">{{ status }}</pre>
       </div>
@@ -172,19 +191,22 @@ mm/yr<br />
 </template>
 
 <script setup>
-  import { govmapXYToWgs84, bufferPointToWktRect } from "./utils/govmapCrs.js";
+import { govmapXYToWgs84, bufferPointToWktRect } from "./utils/govmapCrs.js";
 import { computed, onMounted, ref, watch } from "vue";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import "leaflet-draw";
 import "leaflet-draw/dist/leaflet.draw.css";
 
+/** -------------------- מצב כללי -------------------- */
+const mode = ref("search"); // 'search' | 'subsidence'
+const status = ref("—");
+const busy = ref(false);
+
+/** -------------------- חיפוש סצנות -------------------- */
 const start = ref(daysAgoISO(60));
 const end = ref(todayISO());
 const flightDirection = ref("");
-
-const status = ref("—");
-const busy = ref(false);
 
 const q = ref("");
 const limit = ref(50);
@@ -192,32 +214,41 @@ const showFootprints = ref(true);
 
 const features = ref([]); // raw GeoJSON features
 const selectedKey = ref("");
+
+/** -------------------- GovMap -------------------- */
 const govX = ref("");
 const govY = ref("");
 const govPoint = ref(null);
-  const mode = ref("search"); // 'search' | 'subsidence'
+let govMarker = null;
 
+/** -------------------- שקיעה -------------------- */
 const subsThreshold = ref(-5);
 const lastClick = ref(null);
 const subsMmPerYear = ref(null);
+const subsBusy = ref(false);
+
+const subsBuildings = ref([]); // לרשימה בפאנל
 
 const subsResultText = computed(() => {
   if (subsMmPerYear.value == null) return "אין נתון";
   return subsMmPerYear.value <= subsThreshold.value ? "שוקע" : "יציב/עולה";
 });
 
-let subsMarker = null;
+/** -------------------- Leaflet state -------------------- */
+let map = null;
+let drawControl = null;
 
-// placeholder בלבד
-async function getSubsidenceAt(lat, lng) {
-  return (Math.sin(lat * 8) + Math.cos(lng * 8)) * 6;
-}
+let drawn = null;            // AOI לחיפוש סצנות
+let footprintsGroup = null;  // footprints של סצנות
+let subsAoiGroup = null;     // AOI של שקיעה (מלבן)
+let buildingsGroup = null;   // בניינים שוקעים
 
+let subsAoi = null;          // שכבת המלבן
+let subsMarker = null;       // marker לבדיקת נקודה
 
-let govMarker = null;
-let map, drawn, footprintsGroup;
 const footprintLayers = new Map(); // key -> leaflet layer
 
+/** -------------------- utils תאריכים -------------------- */
 function todayISO() {
   return new Date().toISOString().slice(0, 10);
 }
@@ -230,18 +261,33 @@ function daysAgoISO(n) {
 function formatTime(t) {
   if (!t) return "";
   try {
-    const d = new Date(t);
-    return d.toLocaleString("he-IL");
+    return new Date(t).toLocaleString("he-IL");
   } catch {
     return String(t);
   }
 }
+
+/** -------------------- placeholder נתוני שקיעה/גובה --------------------
+ * כאן מחליפים מאוחר יותר לקריאה אמיתית (InSAR/DEM וכו')
+ */
+async function getSubsidenceRateMmPerYear(lat, lng) {
+  // mm/yr (שלילי = יורד)
+  return (Math.sin(lat * 8) + Math.cos(lng * 8)) * 6;
+}
+
+async function getEstimatedHeightMeters(lat, lng, dateISO) {
+  // "גובה" דמו במטרים כדי שיהיה לך UI עובד. להחליף בנתון אמיתי.
+  const base = 120 + (Math.sin(lat) + Math.cos(lng)) * 8;
+  const day = (new Date(dateISO).getTime() / 86400000) % 30;
+  return base + (day / 30) * 0.3;
+}
+
+/** -------------------- GovMap point -------------------- */
 function useGovmapPoint() {
   try {
     const p = govmapXYToWgs84(govX.value, govY.value);
     govPoint.value = p;
 
-    // שים סמן במפה
     if (govMarker) {
       govMarker.remove();
       govMarker = null;
@@ -264,8 +310,9 @@ function clearGovmapPoint() {
     govMarker = null;
   }
 }
-  async function fetchBuildingsOSM(bbox) {
-  // bbox: { south, west, north, east }
+
+/** -------------------- Overpass בניינים -------------------- */
+async function fetchBuildingsOSM(bbox) {
   const query = `
     [out:json][timeout:25];
     (
@@ -281,13 +328,129 @@ function clearGovmapPoint() {
   const res = await fetch(url, {
     method: "POST",
     body: query,
-    headers: { "Content-Type": "text/plain;charset=UTF-8" }
+    headers: { "Content-Type": "text/plain;charset=UTF-8" },
   });
 
   if (!res.ok) throw new Error("Overpass failed: " + res.status);
-  return res.json(); // זה עדיין Overpass JSON (נמיר ל-GeoJSON)
+  return res.json();
 }
 
+function overpassToGeoJSON(osm) {
+  // ממיר Overpass JSON בסיסי ל-GeoJSON (ways של building).
+  // relations של building לא תמיד יומרו כאן (אפשר להרחיב בהמשך).
+  const elements = osm?.elements || [];
+  const nodes = new Map();
+
+  for (const el of elements) {
+    if (el.type === "node" && typeof el.lat === "number" && typeof el.lon === "number") {
+      nodes.set(el.id, [el.lon, el.lat]);
+    }
+  }
+
+  const feats = [];
+  for (const el of elements) {
+    if (el.type !== "way") continue;
+    if (!el.tags || !el.tags.building) continue;
+    if (!Array.isArray(el.nodes) || el.nodes.length < 3) continue;
+
+    const coords = el.nodes.map((nid) => nodes.get(nid)).filter(Boolean);
+    if (coords.length < 3) continue;
+
+    const first = coords[0];
+    const last = coords[coords.length - 1];
+    if (!last || first[0] !== last[0] || first[1] !== last[1]) coords.push(first);
+
+    feats.push({
+      type: "Feature",
+      properties: { ...(el.tags || {}), osm_id: el.id },
+      geometry: { type: "Polygon", coordinates: [coords] },
+    });
+  }
+
+  return { type: "FeatureCollection", features: feats };
+}
+
+function featureCentroidLatLng(feature) {
+  const coords = feature?.geometry?.coordinates?.[0];
+  if (!coords || coords.length < 3) return null;
+
+  let sumLng = 0,
+    sumLat = 0,
+    n = 0;
+  for (const [lng, lat] of coords) {
+    sumLng += lng;
+    sumLat += lat;
+    n++;
+  }
+  return { lat: sumLat / n, lng: sumLng / n };
+}
+
+function buildingLabel(tags = {}) {
+  const street = tags["addr:street"];
+  const num = tags["addr:housenumber"];
+  const addr = [street, num].filter(Boolean).join(" ");
+  return tags.name || addr || "בניין";
+}
+
+/** -------------------- שכבות שקיעה -------------------- */
+function clearSubsidenceResults() {
+  subsBuildings.value = [];
+  if (buildingsGroup) buildingsGroup.clearLayers();
+}
+
+function clearSubsidenceAll() {
+  clearSubsidenceResults();
+  if (subsAoiGroup) subsAoiGroup.clearLayers();
+  subsAoi = null;
+
+  if (subsMarker) {
+    subsMarker.remove();
+    subsMarker = null;
+  }
+  lastClick.value = null;
+  subsMmPerYear.value = null;
+}
+
+/** -------------------- ציור AOI (Leaflet.draw) -------------------- */
+function rebuildDrawControl() {
+  if (!map) return;
+
+  if (drawControl) {
+    try {
+      map.removeControl(drawControl);
+    } catch {}
+    drawControl = null;
+  }
+
+  const isSubs = mode.value === "subsidence";
+
+  drawControl = new L.Control.Draw({
+    draw: isSubs
+      ? {
+          rectangle: true,
+          polygon: false,
+          polyline: false,
+          circle: false,
+          marker: false,
+          circlemarker: false,
+        }
+      : {
+          rectangle: true,
+          polygon: true,
+          polyline: false,
+          circle: false,
+          marker: false,
+          circlemarker: false,
+        },
+    edit: {
+      featureGroup: isSubs ? subsAoiGroup : drawn,
+    },
+  });
+
+  map.addControl(drawControl);
+}
+
+/** -------------------- initMap -------------------- */
 function initMap() {
   map = L.map("map", { zoomControl: true }).setView([31.5, 35.0], 7);
 
@@ -297,43 +460,53 @@ function initMap() {
   }).addTo(map);
 
   drawn = new L.FeatureGroup().addTo(map);
-
   footprintsGroup = new L.FeatureGroup().addTo(map);
+  subsAoiGroup = new L.FeatureGroup().addTo(map);
+  buildingsGroup = new L.FeatureGroup().addTo(map);
 
-  // AOI ברירת מחדל סביב ישראל
+  // AOI ברירת מחדל לחיפוש
   resetIsraelAOI();
 
-  const drawControl = new L.Control.Draw({
-    draw: { polyline: false, circle: false, marker: false, circlemarker: false },
-    edit: { featureGroup: drawn },
+  rebuildDrawControl();
+
+  // כשמציירים
+  map.on(L.Draw.Event.CREATED, async (e) => {
+    if (mode.value === "subsidence") {
+      // במצב שקיעה: זה המלבן
+      subsAoiGroup.clearLayers();
+      subsAoi = e.layer;
+      subsAoiGroup.addLayer(subsAoi);
+
+      // סריקה אוטומטית אחרי ציור
+      await scanSubsidenceInRect();
+    } else {
+      // חיפוש: AOI
+      drawn.clearLayers();
+      drawn.addLayer(e.layer);
+    }
   });
-  map.addControl(drawControl);
 
-  map.on(L.Draw.Event.CREATED, (e) => {
-    drawn.clearLayers();
-    drawn.addLayer(e.layer);
+  // לחיצה על נקודה במצב שקיעה (בדיקת נקודה)
+  map.on("click", async (e) => {
+    if (mode.value !== "subsidence") return;
+
+    const { lat, lng } = e.latlng;
+    lastClick.value = { lat, lng };
+
+    if (subsMarker) subsMarker.remove();
+    subsMarker = L.marker([lat, lng]).addTo(map);
+
+    try {
+      subsMmPerYear.value = await getSubsidenceRateMmPerYear(lat, lng);
+      status.value = `שקיעה משוערת: ${subsMmPerYear.value.toFixed(2)} mm/yr`;
+    } catch (err) {
+      subsMmPerYear.value = null;
+      status.value = `שגיאה בדגימת שקיעה: ${String(err)}`;
+    }
   });
-    map.on("click", async (e) => {
-  if (mode.value !== "subsidence") return;
-
-  const { lat, lng } = e.latlng;
-  lastClick.value = { lat, lng };
-
-  if (subsMarker) subsMarker.remove();
-  subsMarker = L.marker([lat, lng]).addTo(map);
-
-  try {
-    subsMmPerYear.value = await getSubsidenceAt(lat, lng);
-    status.value = `שקיעה (placeholder): ${subsMmPerYear.value.toFixed(2)} mm/yr`;
-  } catch (err) {
-    subsMmPerYear.value = null;
-    status.value = `שגיאה בדגימת שקיעה: ${String(err)}`;
-  }
-});
-
 }
 
-
+/** -------------------- AOI חיפוש -------------------- */
 function resetIsraelAOI() {
   if (!drawn) return;
   drawn.clearLayers();
@@ -350,8 +523,8 @@ function clearAOI() {
   drawn.clearLayers();
 }
 
+/** -------------------- WKT לחיפוש ASF -------------------- */
 function layerToWkt(layer) {
-  // WKT POLYGON((lon lat, ...)) — lon קודם
   const arr = layer.getLatLngs();
   const ring = Array.isArray(arr[0]) ? arr[0] : arr;
   const pts = ring.map((p) => [p.lng, p.lat]);
@@ -366,6 +539,7 @@ function layerToWkt(layer) {
   return `POLYGON((${body}))`;
 }
 
+/** -------------------- Normalization תוצאות ASF -------------------- */
 function parseTimeMs(feature) {
   const p = feature.properties || {};
   const t = p.startTime || p.start || p.sceneStartTime || p.acquisitionDate;
@@ -380,7 +554,6 @@ function extractGranuleId(feature) {
   for (const c of candidates) if (typeof c === "string" && re.test(c)) return c;
   for (const v of Object.values(p)) if (typeof v === "string" && re.test(v)) return v;
 
-  // fallback קצר
   return p.fileID || p.sceneName || "unknown";
 }
 
@@ -411,7 +584,9 @@ const filtered = computed(() => {
 
 const shown = computed(() => filtered.value.slice(0, limit.value));
 
+/** -------------------- Footprints -------------------- */
 function clearFootprints() {
+  if (!footprintsGroup) return;
   footprintsGroup.clearLayers();
   footprintLayers.clear();
   selectedKey.value = "";
@@ -430,44 +605,42 @@ function addFootprintsToMap(geojsonFeatures) {
   clearFootprints();
 
   const gj = L.geoJSON(
-  { type: "FeatureCollection", features: geojsonFeatures },
-  {
-    style: () => ({
-      weight: 1,
-      opacity: 0.8,
-      fillOpacity: 0.02, // או 0 לקווים בלבד
-    }),
-    onEachFeature: (feature, layer) => {
-      const p = feature.properties || {};
-      const gid = extractGranuleId(feature);
-      const time = p.startTime || p.start || "";
-      const key = `${gid}__${time || ""}`;
+    { type: "FeatureCollection", features: geojsonFeatures },
+    {
+      // קווי מתאר דקים בלי “בלוק כחול”
+      style: () => ({
+        weight: 1,
+        opacity: 0.85,
+        fillOpacity: 0.0,
+      }),
+      onEachFeature: (feature, layer) => {
+        const p = feature.properties || {};
+        const gid = extractGranuleId(feature);
+        const time = p.startTime || p.start || "";
+        const key = `${gid}__${time || ""}`;
 
-      footprintLayers.set(key, layer);
+        footprintLayers.set(key, layer);
 
-      layer.on("click", () => {
-        setSelected(key);
-        const html = `
-          <div style="font-family: system-ui; font-size: 12px;">
-            <div style="font-weight:700; margin-bottom:6px;">${gid}</div>
-            <div>${time ? formatTime(time) : ""}</div>
-            <div>${p.flightDirection ? "כיוון: " + p.flightDirection : ""}${
-              p.relativeOrbit ? " | מסלול: " + p.relativeOrbit : ""
-            }</div>
-          </div>
-        `;
-        layer.bindPopup(html).openPopup();
-      });
-    },
-  }
-);
-
+        layer.on("click", () => {
+          setSelected(key);
+          const html = `
+            <div style="font-family: system-ui; font-size: 12px;">
+              <div style="font-weight:700; margin-bottom:6px;">${gid}</div>
+              <div>${time ? formatTime(time) : ""}</div>
+              <div>${p.flightDirection ? "כיוון: " + p.flightDirection : ""}${
+                p.relativeOrbit ? " | מסלול: " + p.relativeOrbit : ""
+              }</div>
+            </div>
+          `;
+          layer.bindPopup(html).openPopup();
+        });
+      },
+    }
+  );
 
   gj.eachLayer((l) => footprintsGroup.addLayer(l));
-
   applyFootprintsVisibility();
 
-  // אם יש תוצאות – נתאים זום לגבולות שלהן (רק אם המשתמש לא בזום ממש קרוב)
   if (footprintsGroup.getLayers().length) {
     try {
       const b = footprintsGroup.getBounds();
@@ -477,15 +650,14 @@ function addFootprintsToMap(geojsonFeatures) {
 }
 
 function setSelected(key) {
-  // החזרת סגנון קודם
   if (selectedKey.value && footprintLayers.has(selectedKey.value)) {
     const prev = footprintLayers.get(selectedKey.value);
-    prev.setStyle({ weight: 2, fillOpacity: 0.08 });
+    prev.setStyle({ weight: 1, fillOpacity: 0.0 });
   }
   selectedKey.value = key;
   if (footprintLayers.has(key)) {
     const cur = footprintLayers.get(key);
-    cur.setStyle({ weight: 4, fillOpacity: 0.15 });
+    cur.setStyle({ weight: 4, fillOpacity: 0.0 });
   }
 }
 
@@ -499,25 +671,24 @@ function focusResult(key) {
   }
 }
 
+/** -------------------- חיפוש ASF -------------------- */
 async function doSearch() {
   try {
     busy.value = true;
     features.value = [];
     clearFootprints();
     status.value = "מחפש…";
-    const layer = drawn.getLayers()[0];
 
-let wkt = "";
-if (layer) {
-  wkt = layerToWkt(layer);
-} else if (govPoint.value) {
-  // אם אין AOI מצויר, נחפש סביב הנקודה (300m)
-  wkt = bufferPointToWktRect(govPoint.value.lat, govPoint.value.lng, 300);
-} else {
-  throw new Error("אין AOI על המפה וגם לא הוזנה נקודת GovMap");
-}
+    const layer = drawn?.getLayers?.()[0];
 
-
+    let wkt = "";
+    if (layer) {
+      wkt = layerToWkt(layer);
+    } else if (govPoint.value) {
+      wkt = bufferPointToWktRect(govPoint.value.lat, govPoint.value.lng, 300);
+    } else {
+      throw new Error("אין AOI על המפה וגם לא הוזנה נקודת GovMap");
+    }
 
     const qs = new URLSearchParams({
       dataset: "SENTINEL-1",
@@ -537,35 +708,151 @@ if (layer) {
     const data = await r.json();
     const feats = data?.features || [];
 
-features.value = feats;
-addFootprintsToMap(feats.slice(0, limit.value));
+    features.value = feats;
 
-status.value = feats.length
-  ? `נמצאו ${feats.length} סצנות. מציג על המפה ${Math.min(feats.length, limit.value)}.`
-  : "אין תוצאות.";
+    // כדי שלא ייראה “מיליון שכבות”
+    addFootprintsToMap(feats.slice(0, limit.value));
 
-    status.value = feats.length ? `נמצאו ${feats.length} סצנות.` : "אין תוצאות.";
+    status.value = feats.length
+      ? `נמצאו ${feats.length} סצנות. מציג על המפה ${Math.min(feats.length, limit.value)}.`
+      : "אין תוצאות.";
   } catch (e) {
     status.value = `שגיאה: ${String(e)}`;
   } finally {
     busy.value = false;
   }
 }
-  watch(mode, (m) => {
-  if (m !== "subsidence") {
-    // יוצאים ממוד שקיעה -> נקה שכבות של שקיעה
-    subsMmPerYear.value = null;
-    lastClick.value = null;
 
-    if (subsMarker) {
-      subsMarker.remove();
-      subsMarker = null;
-    }
-  
+/** -------------------- שקיעה: סריקה במלבן -------------------- */
+function approxBboxAreaKm2(b) {
+  // הערכת שטח גסה כדי להגן על Overpass
+  const meanLat = (b.getNorth() + b.getSouth()) / 2;
+  const kmPerDegLat = 111.32;
+  const kmPerDegLng = 111.32 * Math.cos((meanLat * Math.PI) / 180);
+  const w = Math.abs(b.getEast() - b.getWest()) * kmPerDegLng;
+  const h = Math.abs(b.getNorth() - b.getSouth()) * kmPerDegLat;
+  return w * h;
+}
+
+async function scanSubsidenceInRect() {
+  if (!subsAoi) {
+    status.value = "אין מלבן שקיעה. במצב שקיעה צייר מלבן על המפה.";
+    return;
   }
-});
 
+  try {
+    subsBusy.value = true;
+    status.value = "טוען בניינים (OSM)…";
 
+    clearSubsidenceResults();
+
+    subsAoiGroup.clearLayers();
+    subsAoiGroup.addLayer(subsAoi);
+
+    const b = subsAoi.getBounds();
+    const area = approxBboxAreaKm2(b);
+    if (area > 25) {
+      throw new Error("המלבן גדול מדי לסריקה. תצמצם לאזור קטן יותר (כדי לא להפיל את Overpass).");
+    }
+
+    const bbox = { south: b.getSouth(), west: b.getWest(), north: b.getNorth(), east: b.getEast() };
+    const osm = await fetchBuildingsOSM(bbox);
+    const gj = overpassToGeoJSON(osm);
+
+    status.value = `נמצאו ${gj.features.length} בניינים. בודק שקיעה…`;
+
+    const sinking = [];
+    const max = 300;
+    const list = gj.features.slice(0, max);
+
+    for (let i = 0; i < list.length; i++) {
+      const f = list[i];
+      const c = featureCentroidLatLng(f);
+      if (!c) continue;
+
+      const rate = await getSubsidenceRateMmPerYear(c.lat, c.lng); // mm/yr
+      if (rate <= subsThreshold.value) {
+        sinking.push({ feature: f, centroid: c, rate });
+      }
+      if ((i + 1) % 30 === 0) status.value = `בודק שקיעה… ${i + 1}/${list.length}`;
+    }
+
+    buildingsGroup.clearLayers();
+
+    for (const item of sinking) {
+      const tags = item.feature.properties || {};
+      const name = buildingLabel(tags);
+
+      const layer = L.geoJSON(item.feature, {
+        style: { weight: 2, opacity: 0.95, fillOpacity: 0.22 },
+      });
+
+      layer.on("click", async () => {
+        // זום אין אוטומטי
+        try {
+          map.fitBounds(layer.getBounds(), { padding: [20, 20] });
+        } catch {}
+
+        // גובה בעבר/נוכחי (כרגע משוער)
+        const years =
+          Math.max(0, (new Date(end.value) - new Date(start.value)) / (1000 * 60 * 60 * 24 * 365.25)) || 0;
+
+        // mm -> m
+        const deltaM = (item.rate / 1000) * years;
+
+        // “גובה משוער” = בסיס דמו + שינוי לפי שקיעה
+        const hPast = await getEstimatedHeightMeters(item.centroid.lat, item.centroid.lng, start.value);
+        const hNow = hPast + deltaM;
+
+        const html = `
+          <div style="font-family:system-ui;font-size:12px;">
+            <div style="font-weight:700;margin-bottom:6px;">${name}</div>
+            <div>שקיעה: <b>${item.rate.toFixed(2)}</b> מ״מ/שנה</div>
+            <div style="margin-top:6px;">תאריך עבר: ${start.value}</div>
+            <div>תאריך נוכחי: ${end.value}</div>
+            <div style="margin-top:6px;">גובה בעבר (משוער): <b>${hPast.toFixed(2)}</b> מ׳</div>
+            <div>גובה נוכחי (משוער): <b>${hNow.toFixed(2)}</b> מ׳</div>
+            <div style="opacity:.75;margin-top:6px;">* כדי שזה יהיה “גובה אמיתי”, צריך לחבר מקור DEM/DSM ונתוני InSAR.</div>
+          </div>
+        `;
+        layer.bindPopup(html).openPopup();
+      });
+
+      layer.addTo(buildingsGroup);
+
+      subsBuildings.value.push({
+        name,
+        rate: item.rate,
+        lat: item.centroid.lat,
+        lng: item.centroid.lng,
+        _layer: layer,
+      });
+    }
+
+    status.value = `בתוך המלבן: ${subsBuildings.value.length} בניינים שוקעים (סף ${subsThreshold.value}).`;
+
+    if (subsBuildings.value.length) {
+      try {
+        map.fitBounds(buildingsGroup.getBounds(), { padding: [20, 20] });
+      } catch {}
+    }
+  } catch (e) {
+    status.value = `שגיאה בסריקת שקיעה: ${String(e)}`;
+  } finally {
+    subsBusy.value = false;
+  }
+}
+
+function focusSubsBuilding(b) {
+  try {
+    map.setView([b.lat, b.lng], Math.max(map.getZoom(), 17));
+  } catch {}
+  try {
+    b._layer?.openPopup?.();
+  } catch {}
+}
+
+/** -------------------- הורדות -------------------- */
 function downloadBlob(name, blob) {
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
@@ -601,12 +888,37 @@ function downloadCSV() {
   downloadBlob(`satmap_s1_${start.value}_${end.value}.csv`, blob);
 }
 
+/** -------------------- UI -------------------- */
 function togglePanelMobile() {
   document.body.classList.toggle("panelOpen");
 }
 
+/** -------------------- mode switching -------------------- */
+watch(mode, (m) => {
+  // בונים מחדש draw control כדי שבמצב שקיעה יהיה רק מלבן
+  rebuildDrawControl();
+
+  if (m === "subsidence") {
+    // לא רוצים שכבות כחולות של footprints
+    showFootprints.value = false;
+    applyFootprintsVisibility();
+    clearFootprints();
+
+    // להשאיר נקי
+    clearSubsidenceAll();
+    status.value = "מצב שקיעה: צייר מלבן על המפה.";
+  } else {
+    // חוזרים לחיפוש
+    clearSubsidenceAll();
+    applyFootprintsVisibility();
+    status.value = "מצב חיפוש: צייר AOI וחפש סצנות.";
+  }
+});
+
+/** -------------------- mount -------------------- */
 onMounted(() => {
   initMap();
+  applyFootprintsVisibility();
 });
 </script>
 
@@ -638,21 +950,38 @@ onMounted(() => {
   justify-content: space-between;
   gap: 10px;
 }
-h3 { margin: 0 0 6px; }
+h3 {
+  margin: 0 0 6px;
+}
 
-.row { margin: 10px 0; }
-.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.row {
+  margin: 10px 0;
+}
+.grid2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
 
-label { display: block; font-size: 12px; opacity: 0.85; margin-bottom: 6px; }
+label {
+  display: block;
+  font-size: 12px;
+  opacity: 0.85;
+  margin-bottom: 6px;
+}
 
-input, select, button {
+input,
+select,
+button {
   width: 100%;
   padding: 10px;
   font-size: 14px;
   border-radius: 10px;
   border: 1px solid #e2e2e2;
 }
-button { cursor: pointer; }
+button {
+  cursor: pointer;
+}
 
 .btnPrimary {
   background: #111;
@@ -664,10 +993,20 @@ button { cursor: pointer; }
   border: 1px solid #e2e2e2;
 }
 
-.actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
 
-.small { font-size: 12px; opacity: 0.85; line-height: 1.35; }
-.muted { opacity: 0.7; }
+.small {
+  font-size: 12px;
+  opacity: 0.85;
+  line-height: 1.35;
+}
+.muted {
+  opacity: 0.7;
+}
 
 .status {
   white-space: pre-wrap;
@@ -677,13 +1016,18 @@ button { cursor: pointer; }
   border-radius: 10px;
   border: 1px solid #eee;
 }
-  .activeBtn {
+
+.activeBtn {
   border-color: #111 !important;
-  box-shadow: 0 0 0 2px rgba(0,0,0,0.06);
+  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.06);
 }
 
-
-.list { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
 .card {
   text-align: right;
   border: 1px solid #eee;
@@ -693,18 +1037,49 @@ button { cursor: pointer; }
 }
 .card.active {
   border-color: #111;
-  box-shadow: 0 0 0 2px rgba(0,0,0,0.05);
+  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.05);
 }
-.line { display: flex; justify-content: space-between; gap: 8px; align-items: center; }
-.mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
-.ell { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 290px; }
-.pill { font-size: 11px; padding: 2px 8px; border-radius: 999px; border: 1px solid #e2e2e2; opacity: .9; }
+.line {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: center;
+}
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+.ell {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 290px;
+}
+.pill {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid #e2e2e2;
+  opacity: 0.9;
+}
 
-.toggleBox { display: flex; align-items: end; justify-content: end; }
-.chk { display:flex; align-items:center; gap:8px; font-size:12px; opacity:.85; }
+.toggleBox {
+  display: flex;
+  align-items: end;
+  justify-content: end;
+}
+.chk {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  opacity: 0.85;
+}
 
 @media (max-width: 900px) {
-  .wrap { grid-template-columns: 1fr; }
+  .wrap {
+    grid-template-columns: 1fr;
+  }
   .panel {
     position: absolute;
     inset: 0;
@@ -714,6 +1089,8 @@ button { cursor: pointer; }
     max-width: 92vw;
     width: 92vw;
   }
-  body.panelOpen .panel { transform: translateX(0); }
+  body.panelOpen .panel {
+    transform: translateX(0);
+  }
 }
 </style>
