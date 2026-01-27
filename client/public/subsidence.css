@@ -1,0 +1,47 @@
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; font-family: system-ui, -apple-system, "Segoe UI", Arial; }
+
+.app { height: 100%; display: grid; grid-template-columns: 360px 1fr; }
+.sidebar { padding: 14px; background: #0f172a; color: #e2e8f0; overflow: auto; }
+.title { font-size: 20px; font-weight: 800; }
+.subtitle { font-size: 13px; opacity: 0.8; margin-bottom: 12px; }
+
+.card {
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.10);
+  border-radius: 12px;
+  padding: 12px;
+  margin-bottom: 12px;
+}
+.cardTitle { font-weight: 800; margin-bottom: 10px; }
+
+.row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+
+input[type="number"]{
+  width: 120px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(255,255,255,0.15);
+  background: rgba(0,0,0,0.25);
+  color: #e2e8f0;
+}
+
+.btn{
+  width: 100%;
+  padding: 10px 12px;
+  border: 0;
+  border-radius: 10px;
+  cursor: pointer;
+  font-weight: 800;
+}
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.result { white-space: pre-wrap; line-height: 1.55; }
+.muted { opacity: 0.75; }
+
+.mapWrap { position: relative; }
+#map { height: 100%; width: 100%; }
+
+@media (max-width: 900px) {
+  .app { grid-template-columns: 1fr; grid-template-rows: 42% 58%; }
+}
