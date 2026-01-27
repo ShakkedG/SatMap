@@ -15,6 +15,16 @@
           ☰
         </button>
       </div>
+      <div class="row grid2">
+  <button class="btnGhost" :class="{ activeBtn: mode === 'search' }" @click="mode = 'search'">
+    חיפוש סצנות
+  </button>
+  <button class="btnGhost" :class="{ activeBtn: mode === 'subsidence' }" @click="mode = 'subsidence'">
+    בדיקת שקיעה
+  </button>
+</div>
+
+<div v-if="mode === 'search'">
 
       <div class="row grid2">
         <div>
@@ -104,6 +114,8 @@
           </button>
         </div>
       </div>
+  </div>
+
       <div class="row grid2">
   <div>
     <label>GovMap X</label>
@@ -123,9 +135,30 @@
 <div class="small" v-if="govPoint">
   נקודה: {{ govPoint.lat.toFixed(6) }}, {{ govPoint.lng.toFixed(6) }} (מקור {{ govPoint.crs }})
 </div>
+<div class="row" v-if="mode === 'subsidence'">
+  <div class="small">מצב שקיעה: לחץ על המפה כדי לבדוק נקודה.</div>
+
+  <div class="row grid2" style="margin-top:10px;">
+    <div>
+      <label>סף “שוקע” (mm/yr)</label>
+      <input type="number" v-model.number="subsThreshold" step="1" />
+    </div>
+  </div>
+
+  <div class="small" v-if="lastClick">
+    נקודה: {{ lastClick.lat.toFixed(6) }}, {{ lastClick.lng.toFixed(6) }}<br />
+    שקיעה (placeholder):
+<span v-if="subsMmPerYear != null">{{ subsMmPerYear.toFixed(2) }}</span>
+<span v-else>N/A</span>
+mm/yr<br />
+
+    תוצאה: <b>{{ subsResultText }}</b>
+  </div>
+</div>
 
 
       <div class="row">
+        
         <div class="small">סטטוס</div>
         <pre class="status">{{ status }}</pre>
       </div>
@@ -139,7 +172,7 @@
 
 <script setup>
   import { govmapXYToWgs84, bufferPointToWktRect } from "./utils/govmapCrs.js";
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import "leaflet-draw";
@@ -161,6 +194,24 @@ const selectedKey = ref("");
 const govX = ref("");
 const govY = ref("");
 const govPoint = ref(null);
+  const mode = ref("search"); // 'search' | 'subsidence'
+
+const subsThreshold = ref(-5);
+const lastClick = ref(null);
+const subsMmPerYear = ref(null);
+
+const subsResultText = computed(() => {
+  if (subsMmPerYear.value == null) return "אין נתון";
+  return subsMmPerYear.value <= subsThreshold.value ? "שוקע" : "יציב/עולה";
+});
+
+let subsMarker = null;
+
+// placeholder בלבד
+async function getSubsidenceAt(lat, lng) {
+  return (Math.sin(lat * 8) + Math.cos(lng * 8)) * 6;
+}
+
 
 let govMarker = null;
 let map, drawn, footprintsGroup;
@@ -261,7 +312,26 @@ function initMap() {
     drawn.clearLayers();
     drawn.addLayer(e.layer);
   });
+    map.on("click", async (e) => {
+  if (mode.value !== "subsidence") return;
+
+  const { lat, lng } = e.latlng;
+  lastClick.value = { lat, lng };
+
+  if (subsMarker) subsMarker.remove();
+  subsMarker = L.marker([lat, lng]).addTo(map);
+
+  try {
+    subsMmPerYear.value = await getSubsidenceAt(lat, lng);
+    status.value = `שקיעה (placeholder): ${subsMmPerYear.value.toFixed(2)} mm/yr`;
+  } catch (err) {
+    subsMmPerYear.value = null;
+    status.value = `שגיאה בדגימת שקיעה: ${String(err)}`;
+  }
+});
+
 }
+
 
 function resetIsraelAOI() {
   if (!drawn) return;
@@ -473,6 +543,20 @@ if (layer) {
     busy.value = false;
   }
 }
+  watch(mode, (m) => {
+  if (m !== "subsidence") {
+    // יוצאים ממוד שקיעה -> נקה שכבות של שקיעה
+    subsMmPerYear.value = null;
+    lastClick.value = null;
+
+    if (subsMarker) {
+      subsMarker.remove();
+      subsMarker = null;
+    }
+  
+  }
+});
+
 
 function downloadBlob(name, blob) {
   const a = document.createElement("a");
@@ -585,6 +669,11 @@ button { cursor: pointer; }
   border-radius: 10px;
   border: 1px solid #eee;
 }
+  .activeBtn {
+  border-color: #111 !important;
+  box-shadow: 0 0 0 2px rgba(0,0,0,0.06);
+}
+
 
 .list { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
 .card {
