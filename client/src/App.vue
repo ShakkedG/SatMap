@@ -379,6 +379,8 @@ const waybackOpacityPct = computed({
 
 let esriLayer = null;
 let waybackLayer = null;
+  let osmLayer = null;
+
 
 const WAYBACK_CONFIG_URL = "https://s3-us-west-2.amazonaws.com/config.maptiles.arcgis.com/waybackconfig.json";
 
@@ -853,6 +855,22 @@ function initMap() {
       status.value = "מלבן נבחר. לחץ “חפש סצנות”.";
     }
   });
+  map.on(L.Draw.Event.EDITED, () => {
+  status.value = "המלבן עודכן.";
+});
+
+map.on(L.Draw.Event.DELETED, () => {
+  if (mode.value === "subsidence") {
+    subsRect = null;
+    subsAoiGroup?.clearLayers?.();
+    status.value = "מלבן בדיקה נמחק.";
+  } else {
+    aoiRect = null;
+    aoiGroup?.clearLayers?.();
+    status.value = "מלבן חיפוש נמחק.";
+  }
+});
+
 
   map.on("click", async (e) => {
     if (mode.value !== "subsidence") return;
