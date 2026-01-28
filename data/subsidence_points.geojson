@@ -1,0 +1,9 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    { "type": "Feature", "properties": { "mmPerYear": -8.2 }, "geometry": { "type": "Point", "coordinates": [35.2137, 31.7683] } },
+    { "type": "Feature", "properties": { "mmPerYear": -6.0 }, "geometry": { "type": "Point", "coordinates": [34.7818, 32.0853] } },
+    { "type": "Feature", "properties": { "mmPerYear": -3.0 }, "geometry": { "type": "Point", "coordinates": [35.3047, 32.6996] } },
+    { "type": "Feature", "properties": { "mmPerYear": -10.5 }, "geometry": { "type": "Point", "coordinates": [35.4960, 31.2500] } }
+  ]
+}
