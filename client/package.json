@@ -9,7 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "proj4": "^2.11.0"
+    "proj4": "^2.11.0",
     "leaflet": "^1.9.4",
     "leaflet-draw": "^1.0.4",
     "vue": "^3.5.0"
