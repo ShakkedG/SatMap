@@ -40,6 +40,43 @@
                 האתר קורא: <span class="mono">/subsidence?lat=..&lng=..&radius=..</span>
               </div>
             </div>
+            <div class="step">
+  <div class="stepNum">3</div>
+  <div class="stepBody">
+    <div class="stepTitle">השוואה עם תצלומי עבר (Wayback)</div>
+    <div class="stepText">
+      זה רק להשוואה ויזואלית (מה השתנה בשטח), לא מדידת שקיעה.
+      הפעל שכבת “עבר” מעל לוויין Esri ושחק עם שקיפות.
+    </div>
+
+    <label class="chk" style="margin-top:6px;">
+      <input type="checkbox" v-model="compareEnabled" />
+      להפעיל תצלום עבר
+    </label>
+
+    <div v-if="compareEnabled" style="margin-top:10px;">
+      <div class="row grid2">
+        <div>
+          <label>תאריך עבר</label>
+          <select v-model="waybackSelected">
+            <option v-for="w in waybackItems" :key="w.releaseNum" :value="String(w.releaseNum)">
+              {{ w.releaseDateLabel || w.itemTitle }}
+            </option>
+          </select>
+        </div>
+        <div>
+          <label>שקיפות ({{ waybackOpacityPct }}%)</label>
+          <input type="range" min="0" max="100" v-model.number="waybackOpacityPct" />
+        </div>
+      </div>
+
+      <div class="mini muted" v-if="waybackLoading">טוען רשימת תצלומי עבר…</div>
+      <div class="mini" v-if="waybackErr">{{ waybackErr }}</div>
+    </div>
+  </div>
+</div>
+
+            
 
             <div class="row grid2">
               <button class="btnGhost" @click="testApi" :disabled="apiTesting">
@@ -327,6 +364,24 @@
 </template>
 
 <script setup>
+  /** ====== Wayback compare (Historical imagery) ====== */
+const compareEnabled = ref(false);
+const waybackItems = ref([]); // [{releaseNum, releaseDateLabel, itemURL, itemTitle}]
+const waybackSelected = ref(""); // releaseNum as string
+const waybackOpacity = ref(0.55);
+const waybackLoading = ref(false);
+const waybackErr = ref("");
+
+const waybackOpacityPct = computed({
+  get: () => Math.round(waybackOpacity.value * 100),
+  set: (v) => (waybackOpacity.value = Math.max(0, Math.min(1, Number(v) / 100))),
+});
+
+let esriLayer = null;
+let waybackLayer = null;
+
+const WAYBACK_CONFIG_URL = "https://s3-us-west-2.amazonaws.com/config.maptiles.arcgis.com/waybackconfig.json";
+
 import { computed, onMounted, ref, watch } from "vue";
 
 import L from "leaflet";
@@ -658,19 +713,101 @@ function rebuildDrawControl() {
   const style = isSubs ? { color: "#b91c1c", weight: 2, opacity: 0.95, fillOpacity: 0.06 } : { color: "#111827", weight: 2, opacity: 0.9, fillOpacity: 0.06 };
 
   drawControl = new L.Control.Draw({
-    draw: {
-      rectangle: { shapeOptions: style },
-      polygon: false,
-      polyline: false,
-      circle: false,
-      marker: false,
-      circlemarker: false,
-    },
+   draw: {
+  rectangle: { shapeOptions: isSubs ? subsStyle : aoiStyle },
+  polygon: false,
+  polyline: false,
+  circle: false,
+  marker: false,
+  circlemarker: false,
+},
+
     edit: { featureGroup: isSubs ? subsAoiGroup : aoiGroup },
   });
 
   map.addControl(drawControl);
 }
+  async function loadWaybackConfigOnce() {
+  if (waybackItems.value.length) return;
+
+  waybackLoading.value = true;
+  waybackErr.value = "";
+  try {
+    const r = await fetch(WAYBACK_CONFIG_URL);
+    if (!r.ok) throw new Error("Wayback config failed: " + r.status);
+    const cfg = await r.json();
+
+    const arr = Object.values(cfg || {})
+      .map((x) => ({
+        releaseNum: x.releaseNum,
+        releaseDateLabel: x.releaseDateLabel,
+        itemURL: x.itemURL,
+        itemTitle: x.itemTitle,
+      }))
+      .filter((x) => x.releaseNum && x.itemURL);
+
+    // newest first
+    arr.sort((a, b) => (b.releaseNum || 0) - (a.releaseNum || 0));
+
+    waybackItems.value = arr;
+
+    if (!waybackSelected.value && arr[0]) waybackSelected.value = String(arr[0].releaseNum);
+  } catch (e) {
+    waybackErr.value = "לא הצלחתי לטעון רשימת תצלומי עבר. " + String(e);
+  } finally {
+    waybackLoading.value = false;
+  }
+}
+
+const WaybackTileLayer = L.TileLayer.extend({
+  initialize(item, options) {
+    this._item = item;
+    L.TileLayer.prototype.initialize.call(this, "", options);
+  },
+  getTileUrl(coords) {
+    const z = coords.z;
+    const x = coords.x;
+    const y = coords.y;
+    // itemURL template לדוגמה: .../tile/{releaseNum}/{level}/{row}/{col}
+    return this._item.itemURL
+      .replace("{level}", String(z))
+      .replace("{row}", String(y))
+      .replace("{col}", String(x));
+  },
+});
+
+function removeWaybackLayer() {
+  if (waybackLayer && map) {
+    try {
+      map.removeLayer(waybackLayer);
+    } catch {}
+  }
+  waybackLayer = null;
+}
+
+function applyWaybackLayer() {
+  if (!map) return;
+  removeWaybackLayer();
+
+  if (!compareEnabled.value) return;
+
+  const rel = Number(waybackSelected.value);
+  const item = waybackItems.value.find((x) => Number(x.releaseNum) === rel);
+  if (!item) return;
+
+  // מומלץ להשוואה: לעבוד על שכבת הלוויין הרגילה ואז להלביש “עבר” מעליה
+  if (esriLayer && !map.hasLayer(esriLayer)) esriLayer.addTo(map);
+
+  waybackLayer = new WaybackTileLayer(item, {
+    opacity: waybackOpacity.value,
+    maxNativeZoom: 19,
+    maxZoom: 22,
+    attribution: "Historical imagery: Esri Wayback",
+  });
+
+  waybackLayer.addTo(map);
+}
+
 
 /** ------------ initMap ------------ */
 function initMap() {
@@ -682,10 +819,11 @@ function initMap() {
     attribution: "&copy; OpenStreetMap",
   }).addTo(map);
 
-  const esri = L.tileLayer(
-    "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-    { maxNativeZoom: 19, maxZoom: 22, attribution: "Tiles &copy; Esri" }
-  );
+ esriLayer = L.tileLayer(
+  "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+  { maxNativeZoom: 19, maxZoom: 22, attribution: "Tiles © Esri" }
+);
+
 
   L.control.layers({ "מפה (OSM)": osm, "לוויין (Esri)": esri }, {}, { position: "topleft" }).addTo(map);
 
@@ -883,16 +1021,24 @@ function applyBuildingsVisibility() {
 }
 
 async function scanSubsidenceInRect() {
-  if (!subsRect) {
-    status.value = "אין מלבן. במצב בניינים שוקעים צייר מלבן על המפה.";
+  // ✅ קח מלבן גם אם subsAoi לא עודכן מסיבה כלשהי
+  const layerFromGroup = subsAoiGroup?.getLayers?.()?.[0] || null;
+  if (!subsAoi && layerFromGroup) subsAoi = layerFromGroup;
+
+  if (!subsAoi) {
+    status.value = "אין מלבן. במצב 'בניינים שוקעים' צייר מלבן על המפה ואז נסה שוב.";
     return;
   }
+
+  // ✅ אל תתחיל סריקה אם ה-API לא נבדק/לא עובד (כי זה ייראה כמו “הכפתור לא עושה כלום”)
   if (!apiOk.value) {
-    status.value = "קודם בדיקת חיבור ל־API (שלב 1).";
+    status.value = "ה-API לא מחובר. לחץ קודם 'בדיקת חיבור' ורק אחרי שמופיע 'API מחובר' תסרוק.";
     return;
   }
 
   try {
+    // ... (מכאן תישאר הפונקציה שלך כמו שהיא)
+
     subsAbort?.abort?.();
     subsAbort = new AbortController();
 
@@ -1089,6 +1235,27 @@ function maybeClosePanelOnMobile() {
 }
 
 /** ------------ mode switch ------------ */
+  watch(compareEnabled, async (v) => {
+  if (!v) {
+    removeWaybackLayer();
+    return;
+  }
+  await loadWaybackConfigOnce();
+  applyWaybackLayer();
+});
+
+watch(waybackSelected, () => {
+  if (compareEnabled.value) applyWaybackLayer();
+});
+
+watch(waybackOpacity, () => {
+  if (waybackLayer) {
+    try {
+      waybackLayer.setOpacity(waybackOpacity.value);
+    } catch {}
+  }
+});
+
 watch(mode, (m) => {
   rebuildDrawControl();
 
