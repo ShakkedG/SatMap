@@ -4,32 +4,34 @@
       <div class="panelTop">
         <div>
           <div class="appTitle">SatMap</div>
-          <div class="appSub">Sentinel-1 Scenes + בדיקת בניינים לשקיעה</div>
+          <div class="appSub">חיפוש Sentinel-1 + בדיקת בניינים לשקיעה (Prototype)</div>
         </div>
         <button class="iconBtn" @click="panelOpen = !panelOpen" title="פתח/סגור">☰</button>
       </div>
 
       <div class="tabs">
         <button class="tab" :class="{ on: mode === 'search' }" @click="mode = 'search'">חיפוש סצנות</button>
-        <button class="tab" :class="{ on: mode === 'subsidence' }" @click="mode = 'subsidence'">איתור בניינים שוקעים</button>
-        <button class="tab" :class="{ on: mode === 'settings' }" @click="mode = 'settings'">הגדרות</button>
+        <button class="tab" :class="{ on: mode === 'subsidence' }" @click="mode = 'subsidence'">בניינים שוקעים</button>
+        <button class="tab" :class="{ on: mode === 'about' }" @click="mode = 'about'">איך זה עובד</button>
       </div>
 
-      <!-- SEARCH MODE -->
+      <!-- ================= SEARCH ================= -->
       <section v-if="mode === 'search'" class="section">
         <div class="banner info">
-          <div class="bannerTitle">מה זה עושה?</div>
+          <div class="bannerTitle">מה עושה מצב “חיפוש סצנות”?</div>
           <div class="bannerText">
-            כאן אתה רק <b>מחפש סצנות Sentinel-1</b> באזור ותאריכים. זה <b>לא מחשב שקיעה</b>.
+            זה מצב שמחזיר <b>רשימת סצנות Sentinel-1</b> מה-ASF לפי אזור ותאריכים.
+            <br />
+            <b>זה לא מחשב שקיעה.</b> הוא רק עוזר להבין איזה תצפיות קיימות לאזור.
           </div>
         </div>
 
         <div class="step">
           <div class="stepNum">1</div>
           <div class="stepBody">
-            <div class="stepTitle">בחר אזור</div>
+            <div class="stepTitle">בחר אזור (AOI)</div>
             <div class="stepText">
-              צייר מלבן/פוליגון על המפה. לחלופין: הזן נקודת GovMap ולחץ “המר לנקודה”.
+              צייר מלבן/פוליגון על המפה. או הזן נקודת GovMap ולחץ “המר לנקודה”.
             </div>
 
             <div class="row grid2">
@@ -145,43 +147,53 @@
         </div>
       </section>
 
-      <!-- SUBSIDENCE MODE -->
+      <!-- ================= SUBSIDENCE ================= -->
       <section v-if="mode === 'subsidence'" class="section">
         <div class="banner warn">
-          <div class="bannerTitle">איך “איתור שקיעה” עובד?</div>
+          <div class="bannerTitle">מה עושה מצב “בניינים שוקעים”?</div>
           <div class="bannerText">
-            <b>שלב א׳:</b> מושך בניינים מ-OpenStreetMap (Overpass).<br />
-            <b>שלב ב׳:</b> דוגם “קצב שקיעה” לכל בניין לפי <b>מקור נתונים</b> (DEMO או API).<br />
-            <b>שלב ג׳:</b> כל בניין עם קצב ≤ הסף מסומן “שוקע”.
+            המערכת עושה 3 שלבים:
+            <br />
+            <b>1)</b> מושכת פוליגונים של בניינים מ-OpenStreetMap (Overpass)
+            <br />
+            <b>2)</b> דוגמת “קצב שקיעה” לכל בניין דרך ה-API שלך (Cloudflare Worker)
+            <br />
+            <b>3)</b> מסמנת “שוקע” אם הקצב ≤ הסף שלך
+            <br /><br />
+            <b>חשוב:</b> זו עדיין <u>הערכה גסה</u> — במיוחד אם הנתונים שלך דלילים / לא InSAR אמיתי.
           </div>
         </div>
 
         <div class="step">
           <div class="stepNum">1</div>
           <div class="stepBody">
-            <div class="stepTitle">צייר מלבן שקיעה</div>
-            <div class="stepText">
-              במצב הזה אפשר לצייר <b>רק מלבן</b>. אחרי ציור – הסריקה יכולה להתחיל אוטומטית או בלחיצה על הכפתור.
+            <div class="stepTitle">חיבור ל-API</div>
+
+            <div class="row">
+              <label>כתובת ה-API (Worker)</label>
+              <input v-model="subsApiBase" />
+              <div class="mini muted" style="margin-top:6px;">
+                האתר קורא: <span class="mono">/subsidence?lat=..&lng=..&radius=..</span>
+              </div>
             </div>
 
-            <div class="row actions">
-              <button class="btnGhost" @click="scanSubsidenceInRect" :disabled="subsBusy">
-                {{ subsBusy ? "סורק…" : "סרוק את המלבן" }}
+            <div class="row grid2">
+              <button class="btnGhost" @click="testApi" :disabled="apiTesting">
+                {{ apiTesting ? "בודק…" : "בדיקת חיבור" }}
               </button>
-              <button class="btnGhost" @click="stopSubsidenceScan" :disabled="!subsBusy">עצור</button>
+              <div class="kpi" :class="{ bad: !apiOk, good: apiOk }">
+                {{ apiOk ? "API מחובר" : "לא בדוק / בעיה" }}
+              </div>
             </div>
 
-            <div class="row actions">
-              <button class="btnGhost" @click="clearSubsidenceAll">נקה הכל</button>
-              <button class="btnGhost" @click="clearSubsidenceResults">נקה תוצאות</button>
-            </div>
+            <div class="mini" v-if="apiTestMsg">{{ apiTestMsg }}</div>
           </div>
         </div>
 
         <div class="step">
           <div class="stepNum">2</div>
           <div class="stepBody">
-            <div class="stepTitle">סף + מגבלות</div>
+            <div class="stepTitle">הגדרות סריקה</div>
 
             <div class="row grid2">
               <div>
@@ -189,34 +201,35 @@
                 <input type="number" v-model.number="subsThreshold" step="1" />
               </div>
               <div>
-                <label>מקס׳ בניינים לבדיקה</label>
-                <input type="number" v-model.number="subsMaxBuildings" step="50" min="50" />
+                <label>רדיוס התאמה לנקודה (מ׳)</label>
+                <input type="number" v-model.number="subsRadiusM" step="100" min="100" />
               </div>
             </div>
 
             <div class="row grid2">
               <div>
-                <label>מקור נתוני שקיעה</label>
-                <select v-model="subsSource">
-                  <option value="demo">DEMO (מדומה)</option>
-                  <option value="api">API (שלך)</option>
-                </select>
+                <label>מקסימום בניינים לבדיקה</label>
+                <input type="number" v-model.number="subsMaxBuildings" step="50" min="50" />
               </div>
               <div>
-                <label>תוצאות במלבן</label>
-                <div class="kpi">{{ subsBuildings.length }}</div>
+                <label>מינימום “אמינות”</label>
+                <select v-model="subsConfidenceMode">
+                  <option value="any">כל תוצאה (כולל רחוק)</option>
+                  <option value="near">רק אם נקודה קרובה</option>
+                </select>
               </div>
             </div>
 
-            <div class="row" v-if="subsSource === 'api'">
-              <label>תבנית URL ל-API</label>
-              <input
-                v-model="subsApiUrl"
-                placeholder='למשל: https://yourdomain/api/subsidence?lat={lat}&lng={lng}'
-              />
-              <div class="mini muted" style="margin-top:6px;">
-                ה-API צריך להחזיר JSON כמו: <span class="mono">{ "mmPerYear": -7.2 }</span>
-              </div>
+            <div class="row grid2">
+              <button class="btnGhost" @click="scanSubsidenceInRect" :disabled="subsBusy">
+                {{ subsBusy ? "סורק…" : "סרוק את המלבן" }}
+              </button>
+              <button class="btnGhost" @click="stopSubsidenceScan" :disabled="!subsBusy">עצור</button>
+            </div>
+
+            <div class="row grid2">
+              <button class="btnGhost" @click="clearSubsidenceResults">נקה תוצאות</button>
+              <button class="btnGhost" @click="clearSubsidenceAll">נקה הכל</button>
             </div>
 
             <div class="progressBox" v-if="subsProgress.stage">
@@ -224,26 +237,31 @@
               <div class="progressBar">
                 <div class="progressFill" :style="{ width: subsProgressPercent + '%' }"></div>
               </div>
-              <div class="mini muted">
-                {{ subsProgress.done }} / {{ subsProgress.total }}
-              </div>
+              <div class="mini muted">{{ subsProgress.done }} / {{ subsProgress.total }}</div>
             </div>
 
-            <details class="details">
-              <summary>למה זה לא “באמת” סנטינל-1 כרגע?</summary>
-              <div class="mini" style="margin-top:8px; line-height:1.5;">
-                חישוב שקיעה מסנטינל-1 דורש עיבוד InSAR של הרבה סצנות (לא רק “חיפוש”).<br />
-                כאן האתר מוכן להתחבר ל-API שלך (או בעתיד לשכבת מהירויות), ואז הוא ידע לצבוע בניינים אמיתיים.
-              </div>
-            </details>
+            <div class="mini muted" v-if="subsStats.totalChecked">
+              נסרקו: <b>{{ subsStats.totalChecked }}</b> |
+              שוקעים: <b>{{ subsStats.sinking }}</b> |
+              אין נתון: <b>{{ subsStats.noData }}</b> |
+              נפסלו (רחוק מדי): <b>{{ subsStats.tooFar }}</b>
+            </div>
+
+            <div class="mini muted" style="margin-top:8px;">
+              <b>איך להשתמש:</b> צייר מלבן על המפה (במצב הזה אפשר לצייר רק מלבן).
+              אחרי ציור, אפשר ללחוץ “סרוק את המלבן”.
+            </div>
           </div>
         </div>
 
         <div class="step" v-if="subsBuildings.length">
           <div class="stepNum">3</div>
           <div class="stepBody">
-            <div class="stepTitle">רשימת בניינים “שוקעים”</div>
-            <div class="stepText">לחיצה על בניין תעשה Zoom ותפתח חלונית עם ההסבר.</div>
+            <div class="stepTitle">תוצאות</div>
+            <div class="stepText">
+              לחיצה על בניין תעשה Zoom ותפתח חלונית עם הסבר:
+              קצב, מרחק לנקודת הנתונים הקרובה, והאם זה עבר את הסף.
+            </div>
 
             <div class="list">
               <button class="card" v-for="(b, i) in subsBuildings" :key="i" @click="focusSubsBuilding(b)">
@@ -253,7 +271,7 @@
                 </div>
                 <div class="mini line">
                   <span>קצב: <b>{{ b.rate.toFixed(2) }}</b> mm/yr</span>
-                  <span class="muted">{{ b.lat.toFixed(4) }}, {{ b.lng.toFixed(4) }}</span>
+                  <span class="muted">מרחק: {{ fmtMeters(b.nearestMeters) }}</span>
                 </div>
               </button>
             </div>
@@ -261,36 +279,92 @@
         </div>
 
         <div class="mini muted" v-if="lastClick" style="margin-top:10px;">
-          לחיצה אחרונה במפה: {{ lastClick.lat.toFixed(6) }}, {{ lastClick.lng.toFixed(6) }}
+          לחיצה אחרונה: {{ lastClick.lat.toFixed(6) }}, {{ lastClick.lng.toFixed(6) }}
           | דגימה: <b v-if="subsMmPerYear != null">{{ subsMmPerYear.toFixed(2) }}</b><span v-else>—</span> mm/yr
           | תוצאה: <b>{{ subsResultText }}</b>
         </div>
       </section>
 
-      <!-- SETTINGS -->
-      <section v-if="mode === 'settings'" class="section">
+      <!-- ================= ABOUT ================= -->
+      <section v-if="mode === 'about'" class="section">
         <div class="banner info">
-          <div class="bannerTitle">כלים קטנים</div>
+          <div class="bannerTitle">למה כרגע זה עדיין לא “אתר שמיש” לשקיעה?</div>
           <div class="bannerText">
-            לינק ל-Google Earth מתעדכן לפי מרכז המפה / בחירות.
+            כרגע המנגנון יודע “לצבוע בניינים” רק אם יש לך <b>מקור נתונים טוב</b> לשקיעה.
+            אם הקובץ שלך מכיל מעט נקודות, או שהערך מגיע מנקודה רחוקה — זה לא אמין.
           </div>
         </div>
 
-        <a class="earthLink" :href="earthUrl" target="_blank" rel="noopener">פתיחה ב-Google Earth (מיקום נוכחי)</a>
-
-        <div class="row grid2" style="margin-top:12px;">
-          <button class="btnGhost" @click="fitAllLayers">התאם זום לכל השכבות</button>
-          <button class="btnGhost" @click="resetViewHome">חזור לתצוגת בית</button>
+        <div class="step">
+          <div class="stepNum">A</div>
+          <div class="stepBody">
+            <div class="stepTitle">מה עובד היום (כן)</div>
+            <ul class="bul">
+              <li>מושך בניינים מ-OSM (Overpass) בתוך מלבן שציירת</li>
+              <li>קורא ל-API שלך ומקבל <span class="mono">mmPerYear</span> + <span class="mono">nearestMeters</span></li>
+              <li>מציג “שוקע” אם עבר את הסף ומציג מרחק כדי להבין אמינות</li>
+            </ul>
+          </div>
         </div>
 
-        <details class="details" style="margin-top:12px;">
-          <summary>מקורות נתונים</summary>
-          <div class="mini" style="margin-top:8px; line-height:1.5;">
-            <b>בניינים:</b> OpenStreetMap דרך Overpass.<br />
-            <b>סצנות:</b> ASF Search API (Sentinel-1 SLC).<br />
-            <b>שקיעה:</b> DEMO (מדומה) או API שאתה מספק.
+        <div class="step">
+          <div class="stepNum">B</div>
+          <div class="stepBody">
+            <div class="stepTitle">מה חסר כדי שזה יהיה אמיתי (לא)</div>
+            <ul class="bul">
+              <li><b>שכבת שקיעה אמיתית</b> (InSAR Velocity / mm/yr) שמכסה את ישראל בצורה צפופה</li>
+              <li>API שמדגם <b>רשת/ראסטר</b> (לא “הנקודה הקרובה” בלבד) — רצוי לפי פיקסל/Tile</li>
+              <li>מטא-דאטה: טווח שנים, שיטת עיבוד, סטיית תקן/איכות (quality)</li>
+              <li>סינון רעשים: פסילת תוצאות כשאיכות נמוכה / קוהרנטיות נמוכה</li>
+            </ul>
           </div>
-        </details>
+        </div>
+
+        <div class="step">
+          <div class="stepNum">C</div>
+          <div class="stepBody">
+            <div class="stepTitle">איך להפוך את זה לאתר שמיש באמת</div>
+            <div class="stepText" style="margin-bottom:8px;">
+              הדרך הכי פרקטית: להחליף את קובץ הנקודות שלך לנתונים אמיתיים צפופים, ולהפוך את ה-API לדוגם ראסטר.
+            </div>
+
+            <ol class="bul">
+              <li>
+                <b>הפק נתוני שקיעה אמיתיים</b>:
+                <div class="mini muted">
+                  למשל: עיבוד InSAR לסנטינל-1 (Velocity mm/yr) על אזורים בישראל.
+                  התוצאה המומלצת: GeoTIFF/COG (ראסטר) או Grid צפוף של נקודות.
+                </div>
+              </li>
+              <li>
+                <b>ארח את השכבה</b>:
+                <div class="mini muted">
+                  אפשר על Cloudflare R2 / GitHub Releases / כל אחסון סטטי.
+                </div>
+              </li>
+              <li>
+                <b>API דוגם פיקסל</b>:
+                <div class="mini muted">
+                  במקום “nearest point”, ה-API יקבל lat/lng ויחזיר את ערך הפיקסל (ועוד איכות).
+                </div>
+              </li>
+              <li>
+                <b>באתר</b>:
+                <div class="mini muted">
+                  מוסיפים: “איכות”, “מקור”, “שנים”, וחיווי ברור אם התוצאה לא אמינה.
+                </div>
+              </li>
+            </ol>
+
+            <div class="banner warn" style="margin-top:12px;">
+              <div class="bannerTitle">כרגע מה הכי מגביל?</div>
+              <div class="bannerText">
+                אם אין לך שכבת mm/yr אמיתית — האתר לא יכול “למצוא שקיעה” באמת.
+                הוא רק כלי תצוגה/חיבור: בניינים + דגימה מהמקור שאתה מספק.
+              </div>
+            </div>
+          </div>
+        </div>
       </section>
 
       <!-- STATUS -->
@@ -315,7 +389,7 @@ import "leaflet/dist/leaflet.css";
 import "leaflet-draw";
 import "leaflet-draw/dist/leaflet.draw.css";
 
-/** Leaflet marker icons fix (מונע 404 ב-GitHub Pages / Vite) */
+/** Leaflet marker icons fix */
 import marker2x from "leaflet/dist/images/marker-icon-2x.png";
 import marker1x from "leaflet/dist/images/marker-icon.png";
 import markerShadow from "leaflet/dist/images/marker-shadow.png";
@@ -327,15 +401,13 @@ L.Icon.Default.mergeOptions({
   shadowUrl: markerShadow,
 });
 
-/** תיקון Leaflet.draw readableArea (מונע תלויות גלובליות) */
+/** Leaflet.draw readableArea patch */
 function patchLeafletDrawReadableArea() {
   if (!L?.GeometryUtil) return;
-
   L.GeometryUtil.readableArea = function (area, isMetric = true, precision = 2) {
     const p = Number.isFinite(precision) ? precision : 2;
     const a = Number(area);
     if (!Number.isFinite(a) || a <= 0) return isMetric ? "0 מ״ר" : "0 ft²";
-
     if (isMetric) {
       if (a >= 1_000_000) return `${(a / 1_000_000).toFixed(p)} קמ״ר`;
       return `${a.toFixed(p)} מ״ר`;
@@ -348,13 +420,13 @@ function patchLeafletDrawReadableArea() {
 }
 patchLeafletDrawReadableArea();
 
-/** -------------------- UI state -------------------- */
+/** UI */
 const panelOpen = ref(true);
-const mode = ref("search"); // 'search' | 'subsidence' | 'settings'
+const mode = ref("search"); // search | subsidence | about
 const status = ref("—");
 const busy = ref(false);
 
-/** -------------------- Search (ASF) -------------------- */
+/** Search */
 const start = ref(daysAgoISO(60));
 const end = ref(todayISO());
 const flightDirection = ref("");
@@ -365,22 +437,28 @@ const showFootprints = ref(true);
 const features = ref([]);
 const selectedKey = ref("");
 
-/** -------------------- GovMap point -------------------- */
+/** GovMap */
 const govX = ref("");
 const govY = ref("");
 const govPoint = ref(null);
 let govMarker = null;
 
-/** -------------------- Subsidence -------------------- */
+/** Subsidence settings */
+const subsApiBase = ref("https://lucky-mouse-9360.shagolan28.workers.dev");
+const subsRadiusM = ref(1200);
 const subsThreshold = ref(-5);
 const subsMaxBuildings = ref(250);
+const subsConfidenceMode = ref("near"); // any | near
+
+/** Subsidence runtime */
+const apiOk = ref(false);
+const apiTesting = ref(false);
+const apiTestMsg = ref("");
+
 const subsBusy = ref(false);
 const subsBuildings = ref([]);
 const lastClick = ref(null);
 const subsMmPerYear = ref(null);
-
-const subsSource = ref("demo"); // 'demo' | 'api'
-const subsApiUrl = ref("https://yourdomain/api/subsidence?lat={lat}&lng={lng}");
 
 const subsProgress = ref({ stage: "", done: 0, total: 0 });
 const subsProgressPercent = computed(() => {
@@ -389,26 +467,18 @@ const subsProgressPercent = computed(() => {
   return Math.max(0, Math.min(100, Math.round((subsProgress.value.done / t) * 100)));
 });
 
+const subsStats = ref({ totalChecked: 0, sinking: 0, noData: 0, tooFar: 0 });
+
 const subsResultText = computed(() => {
   if (subsMmPerYear.value == null) return "אין נתון";
   return subsMmPerYear.value <= subsThreshold.value ? "שוקע" : "יציב/עולה";
 });
 
-/** Google Earth link */
-const earthPoint = ref({ lat: 31.78, lng: 35.22 });
-const earthUrl = computed(() => {
-  const p = earthPoint.value;
-  return p ? `https://earth.google.com/web/search/${p.lat},${p.lng}` : "https://earth.google.com/web/";
-});
-function setEarthPoint(lat, lng) {
-  earthPoint.value = { lat: Number(lat), lng: Number(lng) };
-}
-
-/** -------------------- Leaflet state -------------------- */
+/** Leaflet state */
 let map = null;
 let drawControl = null;
 
-let drawn = null; // AOI for search
+let drawn = null;
 let footprintsGroup = null;
 let subsAoiGroup = null;
 let buildingsGroup = null;
@@ -418,10 +488,10 @@ let subsMarker = null;
 
 const footprintLayers = new Map();
 
-/** Abort controller for subsidence scan */
+/** Abort controller for long scan */
 let subsAbort = null;
 
-/** -------------------- Date utils -------------------- */
+/** ------------ Date utils ------------ */
 function todayISO() {
   return new Date().toISOString().slice(0, 10);
 }
@@ -438,8 +508,14 @@ function formatTime(t) {
     return String(t);
   }
 }
+function fmtMeters(m) {
+  const n = Number(m);
+  if (!Number.isFinite(n)) return "—";
+  if (n >= 1000) return `${(n / 1000).toFixed(2)} ק״מ`;
+  return `${Math.round(n)} מ׳`;
+}
 
-/** -------------------- GovMap point -------------------- */
+/** ------------ GovMap ------------ */
 function useGovmapPoint() {
   try {
     const p = govmapXYToWgs84(govX.value, govY.value);
@@ -451,7 +527,6 @@ function useGovmapPoint() {
     }
     govMarker = L.marker([p.lat, p.lng]).addTo(map);
 
-    setEarthPoint(p.lat, p.lng);
     map.setView([p.lat, p.lng], Math.max(map.getZoom(), 15));
     status.value = `המרה הצליחה: ${p.lat.toFixed(6)}, ${p.lng.toFixed(6)} (מקור ${p.crs})`;
   } catch (e) {
@@ -468,30 +543,55 @@ function clearGovmapPoint() {
   }
 }
 
-/** -------------------- Subsidence provider -------------------- */
-/**
- * DEMO: מדומה (כמו שהיה אצלך) אבל עכשיו זה מוצג במפורש למשתמש.
- * API: קריאה ל-URL שאתה מספק שמחזיר { mmPerYear }.
- */
-async function getSubsidenceRateMmPerYear(lat, lng) {
-  if (subsSource.value === "api") {
-    const url = subsApiUrl.value
-      .replaceAll("{lat}", encodeURIComponent(String(lat)))
-      .replaceAll("{lng}", encodeURIComponent(String(lng)));
+/** ------------ API test ------------ */
+async function testApi() {
+  apiTesting.value = true;
+  apiTestMsg.value = "";
+  try {
+    const base = subsApiBase.value.replace(/\/+$/, "");
+    // health check
+    const h = await fetch(`${base}/health`);
+    if (!h.ok) throw new Error("health failed: " + h.status);
+    const t = (await h.text()).trim();
 
-    const r = await fetch(url, { signal: subsAbort?.signal });
-    if (!r.ok) throw new Error("API failed: " + r.status);
-    const j = await r.json();
-    const v = Number(j?.mmPerYear);
-    if (!Number.isFinite(v)) throw new Error("API returned invalid mmPerYear");
-    return v;
+    // sample check
+    const s = await fetch(`${base}/subsidence?lat=31.78&lng=35.22&radius=${encodeURIComponent(String(subsRadiusM.value))}`);
+    if (!s.ok) throw new Error("subsidence failed: " + s.status);
+    const j = await s.json();
+
+    apiOk.value = true;
+    apiTestMsg.value = `בריאות: "${t}" | דגימה: mmPerYear=${j?.mmPerYear} | nearestMeters=${j?.nearestMeters}`;
+    status.value = "API מחובר ועובד.";
+  } catch (e) {
+    apiOk.value = false;
+    apiTestMsg.value = String(e);
+    status.value = `בעיה ב-API: ${String(e)}`;
+  } finally {
+    apiTesting.value = false;
   }
-
-  // DEMO
-  return (Math.sin(lat * 8) + Math.cos(lng * 8)) * 6;
 }
 
-/** -------------------- Overpass buildings -------------------- */
+/** ------------ Subsidence API call ------------ */
+async function fetchSubsidenceSample(lat, lng) {
+  const base = subsApiBase.value.replace(/\/+$/, "");
+  const url = `${base}/subsidence?lat=${encodeURIComponent(String(lat))}&lng=${encodeURIComponent(String(lng))}&radius=${encodeURIComponent(
+    String(subsRadiusM.value)
+  )}`;
+
+  const r = await fetch(url, { signal: subsAbort?.signal });
+  if (!r.ok) throw new Error("Subsidence API failed: " + r.status);
+  const j = await r.json();
+
+  const mm = Number(j?.mmPerYear);
+  const nearest = Number(j?.nearestMeters);
+
+  return {
+    mmPerYear: Number.isFinite(mm) ? mm : null,
+    nearestMeters: Number.isFinite(nearest) ? nearest : null,
+  };
+}
+
+/** ------------ Overpass buildings ------------ */
 async function fetchBuildingsOSM(bbox) {
   const query = `
     [out:json][timeout:25];
@@ -571,9 +671,11 @@ function buildingLabel(tags = {}) {
   return tags.name || addr || "בניין";
 }
 
-/** -------------------- Clear subsidence -------------------- */
+/** ------------ Clear subsidence ------------ */
 function clearSubsidenceResults() {
   subsBuildings.value = [];
+  subsStats.value = { totalChecked: 0, sinking: 0, noData: 0, tooFar: 0 };
+  subsProgress.value = { stage: "", done: 0, total: 0 };
   if (buildingsGroup) buildingsGroup.clearLayers();
 }
 function clearSubsidenceAll() {
@@ -588,7 +690,6 @@ function clearSubsidenceAll() {
   }
   lastClick.value = null;
   subsMmPerYear.value = null;
-  subsProgress.value = { stage: "", done: 0, total: 0 };
 }
 function stopSubsidenceScan() {
   try {
@@ -596,7 +697,7 @@ function stopSubsidenceScan() {
   } catch {}
 }
 
-/** -------------------- Draw control -------------------- */
+/** ------------ Draw control ------------ */
 function rebuildDrawControl() {
   if (!map) return;
 
@@ -637,7 +738,7 @@ function rebuildDrawControl() {
   map.addControl(drawControl);
 }
 
-/** -------------------- initMap -------------------- */
+/** ------------ initMap ------------ */
 function initMap() {
   map = L.map("map", { zoomControl: true, maxZoom: 22, zoomSnap: 0.25 }).setView([31.78, 35.22], 11);
 
@@ -662,29 +763,18 @@ function initMap() {
   resetIsraelAOI();
   rebuildDrawControl();
 
-  map.on("moveend", () => {
-    const c = map.getCenter();
-    setEarthPoint(c.lat, c.lng);
-  });
-
   map.on(L.Draw.Event.CREATED, async (e) => {
     if (mode.value === "subsidence") {
       subsAoiGroup.clearLayers();
       subsAoi = e.layer;
       subsAoiGroup.addLayer(subsAoi);
 
-      const c = subsAoi.getBounds().getCenter();
-      setEarthPoint(c.lat, c.lng);
-
-      // סריקה אוטומטית לאחר ציור (ברור למשתמש עם פס התקדמות)
-      await scanSubsidenceInRect();
+      // לא מריצים אוטומטית — שיהיה ברור למשתמש שהוא לוחץ “סרוק”
+      status.value = "מלבן נבחר. לחץ “סרוק את המלבן”.";
     } else {
       drawn.clearLayers();
       drawn.addLayer(e.layer);
-      try {
-        const c = e.layer.getBounds().getCenter();
-        setEarthPoint(c.lat, c.lng);
-      } catch {}
+      status.value = "AOI נבחר. לחץ “חפש סצנות”.";
     }
   });
 
@@ -693,14 +783,17 @@ function initMap() {
 
     const { lat, lng } = e.latlng;
     lastClick.value = { lat, lng };
-    setEarthPoint(lat, lng);
 
     if (subsMarker) subsMarker.remove();
     subsMarker = L.marker([lat, lng]).addTo(map);
 
     try {
-      subsMmPerYear.value = await getSubsidenceRateMmPerYear(lat, lng);
-      status.value = `דגימה בנקודה: ${subsMmPerYear.value.toFixed(2)} mm/yr (${subsSource.value.toUpperCase()})`;
+      const s = await fetchSubsidenceSample(lat, lng);
+      subsMmPerYear.value = s.mmPerYear;
+      status.value =
+        s.mmPerYear == null
+          ? `אין נתון קרוב לנקודה (nearest=${fmtMeters(s.nearestMeters)})`
+          : `דגימה: ${s.mmPerYear.toFixed(2)} mm/yr | nearest=${fmtMeters(s.nearestMeters)}`;
     } catch (err) {
       subsMmPerYear.value = null;
       status.value = `שגיאה בדגימה: ${String(err)}`;
@@ -708,7 +801,7 @@ function initMap() {
   });
 }
 
-/** -------------------- AOI search -------------------- */
+/** ------------ AOI search ------------ */
 function resetIsraelAOI() {
   if (!drawn) return;
   drawn.clearLayers();
@@ -718,16 +811,13 @@ function resetIsraelAOI() {
   ]);
   drawn.addLayer(rect);
   if (map) map.fitBounds(rect.getBounds(), { padding: [20, 20], maxZoom: 11 });
-
-  const c = rect.getBounds().getCenter();
-  setEarthPoint(c.lat, c.lng);
 }
 function clearAOI() {
   if (!drawn) return;
   drawn.clearLayers();
 }
 
-/** -------------------- WKT for ASF -------------------- */
+/** ------------ WKT for ASF ------------ */
 function layerToWkt(layer) {
   const arr = layer.getLatLngs();
   const ring = Array.isArray(arr[0]) ? arr[0] : arr;
@@ -743,7 +833,7 @@ function layerToWkt(layer) {
   return `POLYGON((${body}))`;
 }
 
-/** -------------------- Normalize ASF results -------------------- */
+/** ------------ Normalize ASF results ------------ */
 function parseTimeMs(feature) {
   const p = feature.properties || {};
   const t = p.startTime || p.start || p.sceneStartTime || p.acquisitionDate;
@@ -753,10 +843,8 @@ function extractGranuleId(feature) {
   const p = feature?.properties || {};
   const candidates = [p.sceneName, p.fileID, p.granuleUR, p.name, p.id].filter(Boolean);
   const re = /^S1[AB]_/;
-
   for (const c of candidates) if (typeof c === "string" && re.test(c)) return c;
   for (const v of Object.values(p)) if (typeof v === "string" && re.test(v)) return v;
-
   return p.fileID || p.sceneName || "unknown";
 }
 
@@ -778,7 +866,6 @@ const normalized = computed(() => {
     })
     .sort((a, b) => parseTimeMs(b._feature) - parseTimeMs(a._feature));
 });
-
 const filtered = computed(() => {
   const needle = q.value.trim().toLowerCase();
   if (!needle) return normalized.value;
@@ -786,7 +873,7 @@ const filtered = computed(() => {
 });
 const shown = computed(() => filtered.value.slice(0, limit.value));
 
-/** -------------------- Footprints -------------------- */
+/** ------------ Footprints ------------ */
 function clearFootprints() {
   if (!footprintsGroup) return;
   footprintsGroup.clearLayers();
@@ -815,23 +902,14 @@ function addFootprintsToMap(geojsonFeatures) {
         const key = `${gid}__${time || ""}`;
 
         footprintLayers.set(key, layer);
-
         layer.on("click", () => {
           setSelected(key);
-          try {
-            const c = layer.getBounds().getCenter();
-            setEarthPoint(c.lat, c.lng);
-          } catch {}
-
           const html = `
             <div style="font-family: system-ui; font-size: 12px;">
               <div style="font-weight:700; margin-bottom:6px;">${gid}</div>
               <div>${time ? formatTime(time) : ""}</div>
-              <div>${p.flightDirection ? "כיוון: " + p.flightDirection : ""}${
-                p.relativeOrbit ? " | מסלול: " + p.relativeOrbit : ""
-              }</div>
-            </div>
-          `;
+              <div>${p.flightDirection ? "כיוון: " + p.flightDirection : ""}${p.relativeOrbit ? " | מסלול: " + p.relativeOrbit : ""}</div>
+            </div>`;
           layer.bindPopup(html).openPopup();
         });
       },
@@ -848,7 +926,6 @@ function addFootprintsToMap(geojsonFeatures) {
     } catch {}
   }
 }
-
 function setSelected(key) {
   if (selectedKey.value && footprintLayers.has(selectedKey.value)) {
     footprintLayers.get(selectedKey.value).setStyle({ weight: 1, opacity: 0.6, fillOpacity: 0.0 });
@@ -868,7 +945,7 @@ function focusResult(key) {
   }
 }
 
-/** -------------------- ASF Search -------------------- */
+/** ------------ ASF search ------------ */
 async function doSearch() {
   try {
     busy.value = true;
@@ -881,13 +958,8 @@ async function doSearch() {
     let wkt = "";
     if (layer) {
       wkt = layerToWkt(layer);
-      try {
-        const c = layer.getBounds().getCenter();
-        setEarthPoint(c.lat, c.lng);
-      } catch {}
     } else if (govPoint.value) {
       wkt = bufferPointToWktRect(govPoint.value.lat, govPoint.value.lng, 300);
-      setEarthPoint(govPoint.value.lat, govPoint.value.lng);
     } else {
       throw new Error("אין AOI על המפה וגם לא הוזנה נקודת GovMap");
     }
@@ -925,7 +997,7 @@ async function doSearch() {
   }
 }
 
-/** -------------------- Subsidence scan -------------------- */
+/** ------------ Subsidence scan ------------ */
 function approxBboxAreaKm2(b) {
   const meanLat = (b.getNorth() + b.getSouth()) / 2;
   const kmPerDegLat = 111.32;
@@ -937,31 +1009,26 @@ function approxBboxAreaKm2(b) {
 
 async function scanSubsidenceInRect() {
   if (!subsAoi) {
-    status.value = "אין מלבן שקיעה. במצב שקיעה צייר מלבן על המפה.";
+    status.value = "אין מלבן. במצב בניינים שוקעים צייר מלבן על המפה.";
     return;
   }
 
   try {
-    // init abort
     subsAbort?.abort?.();
     subsAbort = new AbortController();
 
     subsBusy.value = true;
+    clearSubsidenceResults();
+
     subsProgress.value = { stage: "טוען בניינים (OSM)…", done: 0, total: 1 };
     status.value = "טוען בניינים (OSM)…";
-    clearSubsidenceResults();
 
     subsAoiGroup.clearLayers();
     subsAoiGroup.addLayer(subsAoi);
 
     const b = subsAoi.getBounds();
-    const c = b.getCenter();
-    setEarthPoint(c.lat, c.lng);
-
     const area = approxBboxAreaKm2(b);
-    if (area > 25) {
-      throw new Error("המלבן גדול מדי לסריקה. תצמצם לאזור קטן יותר (כדי לא להפיל את Overpass).");
-    }
+    if (area > 25) throw new Error("המלבן גדול מדי. תצמצם כדי לא להפיל את Overpass.");
 
     const bbox = { south: b.getSouth(), west: b.getWest(), north: b.getNorth(), east: b.getEast() };
     const osm = await fetchBuildingsOSM(bbox);
@@ -973,8 +1040,10 @@ async function scanSubsidenceInRect() {
     subsProgress.value = { stage: "בודק שקיעה לכל בניין…", done: 0, total: list.length };
     status.value = `נמצאו ${all.length} בניינים. בודק עד ${list.length}…`;
 
-    // דגימה סדרתית (פשוט/בטוח). אם תרצה נוכל להפוך את זה ל-concurrency מוגבל.
+    let noData = 0;
+    let tooFar = 0;
     const sinking = [];
+
     for (let i = 0; i < list.length; i++) {
       if (subsAbort.signal.aborted) throw new Error("בוטל");
       const f = list[i];
@@ -984,8 +1053,27 @@ async function scanSubsidenceInRect() {
         continue;
       }
 
-      const rate = await getSubsidenceRateMmPerYear(cc.lat, cc.lng);
-      if (rate <= subsThreshold.value) sinking.push({ feature: f, centroid: cc, rate });
+      const s = await fetchSubsidenceSample(cc.lat, cc.lng);
+
+      // אין נתון (או API מחזיר mmPerYear=null)
+      if (s.mmPerYear == null) {
+        noData++;
+        subsProgress.value.done = i + 1;
+        continue;
+      }
+
+      // אם רוצים "אמינות": נדרוש נקודה קרובה (nearestMeters != null)
+      if (subsConfidenceMode.value === "near") {
+        if (s.nearestMeters == null || s.nearestMeters > subsRadiusM.value) {
+          tooFar++;
+          subsProgress.value.done = i + 1;
+          continue;
+        }
+      }
+
+      if (s.mmPerYear <= subsThreshold.value) {
+        sinking.push({ feature: f, centroid: cc, rate: s.mmPerYear, nearestMeters: s.nearestMeters });
+      }
 
       subsProgress.value.done = i + 1;
       if ((i + 1) % 25 === 0) status.value = `בודק… ${i + 1}/${list.length}`;
@@ -1005,12 +1093,16 @@ async function scanSubsidenceInRect() {
       const expl = `
         <div style="font-family:system-ui;font-size:12px;line-height:1.45;">
           <div style="font-weight:800;margin-bottom:6px;">${name}</div>
-          <div><b>קצב שקיעה:</b> ${item.rate.toFixed(2)} mm/yr</div>
+          <div><b>קצב:</b> ${item.rate.toFixed(2)} mm/yr</div>
+          <div><b>מרחק לנקודת נתון:</b> ${fmtMeters(item.nearestMeters)}</div>
           <div style="margin-top:8px;">
-            <div style="font-weight:700;margin-bottom:4px;">איך נקבע?</div>
+            <div style="font-weight:700;margin-bottom:4px;">איך זה חושב?</div>
             <div>1) הבניין הגיע מ-OSM (Overpass)</div>
-            <div>2) דגמנו שקיעה במרכז הבניין ממקור: <b>${subsSource.value.toUpperCase()}</b></div>
-            <div>3) הסף שלך: <b>${subsThreshold.value}</b> mm/yr</div>
+            <div>2) דגמנו שקיעה במרכז הבניין מ-API (Cloudflare Worker)</div>
+            <div>3) סף שלך: <b>${subsThreshold.value}</b> mm/yr</div>
+            <div style="margin-top:6px;opacity:.85;">
+              הערה: תוצאה אמינה רק אם יש שכבת InSAR צפופה ואיכות טובה.
+            </div>
           </div>
         </div>
       `;
@@ -1020,7 +1112,6 @@ async function scanSubsidenceInRect() {
           map.fitBounds(layer.getBounds(), { padding: [20, 20], maxZoom: 19 });
         } catch {}
         layer.bindPopup(expl).openPopup();
-        setEarthPoint(item.centroid.lat, item.centroid.lng);
       });
 
       layer.addTo(buildingsGroup);
@@ -1028,6 +1119,7 @@ async function scanSubsidenceInRect() {
       results.push({
         name,
         rate: item.rate,
+        nearestMeters: item.nearestMeters,
         lat: item.centroid.lat,
         lng: item.centroid.lng,
         _layer: layer,
@@ -1035,9 +1127,19 @@ async function scanSubsidenceInRect() {
     }
 
     subsBuildings.value = results.sort((a, b) => a.rate - b.rate);
-    status.value = `בתוך המלבן: ${subsBuildings.value.length} בניינים “שוקעים” (סף ${subsThreshold.value}, מקור ${subsSource.value.toUpperCase()}).`;
+
+    subsStats.value = {
+      totalChecked: list.length,
+      sinking: subsBuildings.value.length,
+      noData,
+      tooFar,
+    };
 
     subsProgress.value = { stage: "", done: 0, total: 0 };
+
+    status.value =
+      `תוצאות: שוקעים=${subsBuildings.value.length} | אין נתון=${noData} | נפסלו(רחוק)=${tooFar} | ` +
+      `סף=${subsThreshold.value} | רדיוס=${subsRadiusM.value}m`;
 
     if (subsBuildings.value.length) {
       try {
@@ -1058,10 +1160,9 @@ function focusSubsBuilding(b) {
   try {
     b._layer?.openPopup?.();
   } catch {}
-  setEarthPoint(b.lat, b.lng);
 }
 
-/** -------------------- Downloads -------------------- */
+/** ------------ Downloads ------------ */
 function downloadBlob(name, blob) {
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
@@ -1071,13 +1172,11 @@ function downloadBlob(name, blob) {
   a.remove();
   setTimeout(() => URL.revokeObjectURL(a.href), 1500);
 }
-
 function downloadGeoJSON() {
   const fc = { type: "FeatureCollection", features: features.value };
   const blob = new Blob([JSON.stringify(fc, null, 2)], { type: "application/geo+json" });
   downloadBlob(`satmap_s1_${start.value}_${end.value}.geojson`, blob);
 }
-
 function downloadCSV() {
   const rows = normalized.value.map((r) => ({
     id: r.gid,
@@ -1085,36 +1184,19 @@ function downloadCSV() {
     flightDirection: r.flightDirection,
     relativeOrbit: r.relativeOrbit,
   }));
-
   const header = Object.keys(rows[0] || { id: "", time: "", flightDirection: "", relativeOrbit: "" });
   const esc = (v) => `"${String(v ?? "").replaceAll('"', '""')}"`;
   const csv = header.join(",") + "\n" + rows.map((row) => header.map((h) => esc(row[h])).join(",")).join("\n");
-
   const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
   downloadBlob(`satmap_s1_${start.value}_${end.value}.csv`, blob);
 }
 
-/** -------------------- Misc UI helpers -------------------- */
+/** ------------ UI helpers ------------ */
 function maybeClosePanelOnMobile() {
   if (window.matchMedia("(max-width: 900px)").matches) panelOpen.value = false;
 }
-function fitAllLayers() {
-  try {
-    const groups = [footprintsGroup, buildingsGroup, subsAoiGroup, drawn].filter(Boolean);
-    let bounds = null;
-    for (const g of groups) {
-      const b = g.getBounds?.();
-      if (!b || !b.isValid?.() || !b.isValid()) continue;
-      bounds = bounds ? bounds.extend(b) : b;
-    }
-    if (bounds && bounds.isValid()) map.fitBounds(bounds, { padding: [24, 24], maxZoom: 14 });
-  } catch {}
-}
-function resetViewHome() {
-  map.setView([31.78, 35.22], 11);
-}
 
-/** -------------------- mode switch -------------------- */
+/** ------------ mode switch ------------ */
 watch(mode, (m) => {
   rebuildDrawControl();
 
@@ -1122,21 +1204,19 @@ watch(mode, (m) => {
     showFootprints.value = false;
     applyFootprintsVisibility();
     clearFootprints();
-
     clearSubsidenceAll();
-    status.value = "מצב בניינים שוקעים: צייר מלבן על המפה.";
+    status.value = "מצב בניינים שוקעים: צייר מלבן, בדוק API, ואז סרוק.";
   } else if (m === "search") {
     clearSubsidenceAll();
     showFootprints.value = true;
     applyFootprintsVisibility();
     status.value = "מצב חיפוש: צייר AOI וחפש סצנות.";
   } else {
-    // settings
-    status.value = "הגדרות.";
+    status.value = "הסבר: למה זה עדיין Prototype ואיך הופכים את זה לשמיש.";
   }
 });
 
-/** -------------------- mount -------------------- */
+/** ------------ mount ------------ */
 onMounted(() => {
   initMap();
   applyFootprintsVisibility();
@@ -1384,16 +1464,6 @@ button {
   border-radius: 12px;
   border: 1px solid #eee;
 }
-.earthLink {
-  display: inline-block;
-  margin-top: 6px;
-  padding: 10px;
-  border-radius: 12px;
-  border: 1px solid #e5e7eb;
-  text-decoration: none;
-  color: inherit;
-  background: #fff;
-}
 
 .kpi {
   padding: 10px;
@@ -1402,6 +1472,14 @@ button {
   background: #f9fafb;
   font-weight: 900;
   text-align: center;
+}
+.kpi.good {
+  border-color: #bbf7d0;
+  background: #f0fdf4;
+}
+.kpi.bad {
+  border-color: #fecaca;
+  background: #fef2f2;
 }
 
 /* progress */
@@ -1426,16 +1504,13 @@ button {
   width: 0%;
 }
 
-/* details */
-.details {
-  border: 1px solid #e5e7eb;
-  border-radius: 14px;
-  padding: 10px;
-  background: #fff;
+/* bullets */
+.bul {
+  margin: 0;
+  padding-inline-start: 18px;
 }
-.details summary {
-  cursor: pointer;
-  font-weight: 800;
+.bul li {
+  margin: 6px 0;
 }
 
 /* mobile */
