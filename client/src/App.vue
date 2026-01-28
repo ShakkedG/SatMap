@@ -698,6 +698,9 @@ function stopSubsidenceScan() {
 
 /** ------------ Draw control (RECTANGLE ONLY) ------------ */
 function rebuildDrawControl() {
+  const aoiStyle = { color: "#111827", weight: 2, opacity: 0.9, fillOpacity: 0.06 };
+const subsStyle = { color: "#b91c1c", weight: 2, opacity: 0.95, fillOpacity: 0.06 };
+
   if (!map) return;
 
   patchLeafletDrawReadableArea();
@@ -712,18 +715,18 @@ function rebuildDrawControl() {
   const isSubs = mode.value === "subsidence";
   const style = isSubs ? { color: "#b91c1c", weight: 2, opacity: 0.95, fillOpacity: 0.06 } : { color: "#111827", weight: 2, opacity: 0.9, fillOpacity: 0.06 };
 
-  drawControl = new L.Control.Draw({
-   draw: {
-  rectangle: { shapeOptions: isSubs ? subsStyle : aoiStyle },
-  polygon: false,
-  polyline: false,
-  circle: false,
-  marker: false,
-  circlemarker: false,
-},
+drawControl = new L.Control.Draw({
+  draw: {
+    rectangle: { shapeOptions: isSubs ? subsStyle : aoiStyle },
+    polygon: false,
+    polyline: false,
+    circle: false,
+    marker: false,
+    circlemarker: false,
+  },
+  edit: { featureGroup: isSubs ? subsAoiGroup : aoiGroup },
+});
 
-    edit: { featureGroup: isSubs ? subsAoiGroup : aoiGroup },
-  });
 
   map.addControl(drawControl);
 }
@@ -765,15 +768,14 @@ const WaybackTileLayer = L.TileLayer.extend({
     L.TileLayer.prototype.initialize.call(this, "", options);
   },
   getTileUrl(coords) {
-    const z = coords.z;
-    const x = coords.x;
-    const y = coords.y;
-    // itemURL template לדוגמה: .../tile/{releaseNum}/{level}/{row}/{col}
-    return this._item.itemURL
-      .replace("{level}", String(z))
-      .replace("{row}", String(y))
-      .replace("{col}", String(x));
-  },
+  const z = coords.z, x = coords.x, y = coords.y;
+  return this._item.itemURL
+    .replace("{releaseNum}", String(this._item.releaseNum))
+    .replace("{level}", String(z))
+    .replace("{row}", String(y))
+    .replace("{col}", String(x));
+}
+,
 });
 
 function removeWaybackLayer() {
@@ -825,7 +827,7 @@ function initMap() {
 );
 
 
-  L.control.layers({ "מפה (OSM)": osm, "לוויין (Esri)": esri }, {}, { position: "topleft" }).addTo(map);
+  L.control.layers({ "מפה (OSM)": osm, "לוויין (Esri)": esriLayer }, {}, { position: "topleft" }).addTo(map);
 
   aoiGroup = new L.FeatureGroup().addTo(map);
   subsAoiGroup = new L.FeatureGroup().addTo(map);
@@ -1021,24 +1023,20 @@ function applyBuildingsVisibility() {
 }
 
 async function scanSubsidenceInRect() {
-  // ✅ קח מלבן גם אם subsAoi לא עודכן מסיבה כלשהי
-  const layerFromGroup = subsAoiGroup?.getLayers?.()?.[0] || null;
-  if (!subsAoi && layerFromGroup) subsAoi = layerFromGroup;
-
-  if (!subsAoi) {
+  // קח מלבן מה-state או מה-group
+  const rect = subsRect || (subsAoiGroup?.getLayers?.()?.[0] ?? null);
+  if (!rect) {
     status.value = "אין מלבן. במצב 'בניינים שוקעים' צייר מלבן על המפה ואז נסה שוב.";
     return;
   }
+  subsRect = rect;
 
-  // ✅ אל תתחיל סריקה אם ה-API לא נבדק/לא עובד (כי זה ייראה כמו “הכפתור לא עושה כלום”)
   if (!apiOk.value) {
-    status.value = "ה-API לא מחובר. לחץ קודם 'בדיקת חיבור' ורק אחרי שמופיע 'API מחובר' תסרוק.";
+    status.value = "ה-API לא מחובר. לחץ קודם 'בדיקת חיבור' ואז סרוק.";
     return;
   }
 
   try {
-    // ... (מכאן תישאר הפונקציה שלך כמו שהיא)
-
     subsAbort?.abort?.();
     subsAbort = new AbortController();
 
@@ -1049,7 +1047,7 @@ async function scanSubsidenceInRect() {
     subsProgress.value = { stage: "טוען בניינים (OSM)…", done: 0, total: 1 };
     status.value = "טוען בניינים (OSM)…";
 
-    const b = subsRect.getBounds();
+    const b = rect.getBounds();   // ✅ לא subsRect / לא subsAoi
     const area = approxBboxAreaKm2(b);
     if (area > 25) throw new Error("המלבן גדול מדי. תצמצם כדי לא להפיל את Overpass.");
 
@@ -1063,30 +1061,22 @@ async function scanSubsidenceInRect() {
     subsProgress.value = { stage: "בודק שקיעה לכל בניין…", done: 0, total: list.length };
     status.value = `נמצאו ${all.length} בניינים. בודק עד ${list.length}…`;
 
-    let noData = 0;
-    let tooFar = 0;
-    let sinking = 0;
-    let stable = 0;
-
+    let noData = 0, tooFar = 0, sinking = 0, stable = 0;
     const results = [];
 
     for (let i = 0; i < list.length; i++) {
       if (subsAbort.signal.aborted) throw new Error("בוטל");
+
       const f = list[i];
       const cc = featureCentroidLatLng(f);
-      if (!cc) {
-        subsProgress.value.done = i + 1;
-        continue;
-      }
+      if (!cc) { subsProgress.value.done = i + 1; continue; }
 
       const s = await fetchSubsidenceSample(cc.lat, cc.lng);
 
       let statusKey = "nodata";
-
       if (s.mmPerYear == null) {
         noData++;
       } else {
-        // confidence filter
         if (subsConfidenceMode.value === "near") {
           if (s.nearestMeters == null || s.nearestMeters > subsRadiusM.value) {
             tooFar++;
@@ -1094,19 +1084,11 @@ async function scanSubsidenceInRect() {
             continue;
           }
         }
-
-        if (s.mmPerYear <= subsThreshold.value) {
-          statusKey = "sinking";
-          sinking++;
-        } else {
-          statusKey = "stable";
-          stable++;
-        }
+        if (s.mmPerYear <= subsThreshold.value) { statusKey = "sinking"; sinking++; }
+        else { statusKey = "stable"; stable++; }
       }
 
-      const tags = f.properties || {};
-      const name = buildingLabel(tags);
-
+      const name = buildingLabel(f.properties || {});
       results.push({
         name,
         status: statusKey,
@@ -1121,7 +1103,7 @@ async function scanSubsidenceInRect() {
       if ((i + 1) % 25 === 0) status.value = `בודק… ${i + 1}/${list.length}`;
     }
 
-    // render map layers
+    // ציור שכבות (כמו אצלך) – נשאר אותו רעיון
     for (const r of results) {
       const style =
         r.status === "sinking"
@@ -1132,64 +1114,38 @@ async function scanSubsidenceInRect() {
 
       const layer = L.geoJSON(r.feature, { style });
 
-      const expl = `
-        <div style="font-family:system-ui;font-size:12px;line-height:1.45;">
-          <div style="font-weight:800;margin-bottom:6px;">${r.name}</div>
-          <div><b>סטטוס:</b> ${pillText(r.status)}</div>
-          <div><b>קצב:</b> ${r.mmPerYear == null ? "—" : r.mmPerYear.toFixed(2) + " mm/yr"}</div>
-          <div><b>מרחק לנקודת נתון:</b> ${fmtMeters(r.nearestMeters)}</div>
-          <div style="margin-top:8px;opacity:.85;">
-            שיטה: OSM → מרכז בניין → API /subsidence → סיווג לפי סף (${subsThreshold.value})
-          </div>
-        </div>
-      `;
-
       layer.on("click", () => {
-        try {
-          map.fitBounds(layer.getBounds(), { padding: [20, 20], maxZoom: 19 });
-        } catch {}
-        layer.bindPopup(expl).openPopup();
+        try { map.fitBounds(layer.getBounds(), { padding: [20, 20], maxZoom: 19 }); } catch {}
+        layer.bindPopup(`
+          <div style="font-family:system-ui;font-size:12px;line-height:1.45;">
+            <div style="font-weight:800;margin-bottom:6px;">${r.name}</div>
+            <div><b>סטטוס:</b> ${pillText(r.status)}</div>
+            <div><b>קצב:</b> ${r.mmPerYear == null ? "—" : r.mmPerYear.toFixed(2) + " mm/yr"}</div>
+            <div><b>מרחק:</b> ${fmtMeters(r.nearestMeters)}</div>
+          </div>
+        `).openPopup();
       });
 
-      // attach for list click
       r._layer = layer;
-
       if (r.status === "sinking") layer.addTo(buildingsSinkingGroup);
       else if (r.status === "stable") layer.addTo(buildingsStableGroup);
       else layer.addTo(buildingsNoDataGroup);
     }
 
     subsResults.value = results;
-
-    subsStats.value = {
-      totalChecked: results.length,
-      sinking,
-      stable,
-      noData,
-      tooFar,
-    };
-
+    subsStats.value = { totalChecked: results.length, sinking, stable, noData, tooFar };
     subsProgress.value = { stage: "", done: 0, total: 0 };
-    status.value =
-      `סיום: שוקעים=${sinking} | יציב=${stable} | אין נתון=${noData} | נפסלו(רחוק)=${tooFar} | סף=${subsThreshold.value} | רדיוס=${subsRadiusM.value}m`;
+
+    status.value = `סיום: שוקעים=${sinking} | יציב=${stable} | אין נתון=${noData} | נפסלו(רחוק)=${tooFar}`;
 
     applyBuildingsVisibility();
-
-    if (buildingsSinkingGroup.getLayers().length) {
-      try {
-        map.fitBounds(buildingsSinkingGroup.getBounds(), { padding: [20, 20], maxZoom: 18 });
-      } catch {}
-    } else if (buildingsStableGroup.getLayers().length && showStableOnMap.value) {
-      try {
-        map.fitBounds(buildingsStableGroup.getBounds(), { padding: [20, 20], maxZoom: 18 });
-      } catch {}
-    }
   } catch (e) {
     status.value = `שגיאה בסריקה: ${String(e)}`;
   } finally {
     subsBusy.value = false;
   }
 }
+
 
 function focusSubsBuilding(b) {
   try {
