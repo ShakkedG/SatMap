@@ -70,7 +70,7 @@ import "leaflet/dist/leaflet.css";
 
 // ✅ אם הקובץ נמצא תחת src/
 // path: SatMap/client/src/tlvex.geojson
-import tlvGeoUrl from "./tlvex.geojson?url";
+const tlvGeoUrl = `${import.meta.env.BASE_URL}data/tlvex.geojson`;
 
 /** ===== UI state ===== */
 const threshold = ref(-5);
