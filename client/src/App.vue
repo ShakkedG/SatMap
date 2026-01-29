@@ -543,6 +543,8 @@ const subsShown = computed(() => {
 /** Map state */
 let map = null;
 let drawControl = null;
+  let subsPointsGroup = null; // שכבת נקודות שקיעה (GeoJSON)
+
 
 let aoiGroup = null;
 let aoiRect = null;
@@ -706,6 +708,37 @@ function resolveUrl(u) {
     return s;
   }
 }
+function renderLocalPointsToMap({ fit = false } = {}) {
+  if (!map || !subsPointsGroup) return;
+
+  subsPointsGroup.clearLayers();
+
+  const pts = Array.isArray(localPoints.value) ? localPoints.value : [];
+  for (const p of pts) {
+    const isSink = p.mmPerYear <= subsThreshold.value;
+
+    const marker = L.circleMarker([p.lat, p.lng], {
+      radius: 6,
+      weight: 2,
+      opacity: 1,
+      color: isSink ? "#b91c1c" : "#111827",
+      fillOpacity: 0.9,
+      fillColor: isSink ? "#b91c1c" : "#111827",
+    }).bindPopup(`קצב: <b>${Number(p.mmPerYear).toFixed(2)}</b> mm/yr`);
+
+    subsPointsGroup.addLayer(marker);
+  }
+
+  try {
+    subsPointsGroup.bringToFront();
+  } catch {}
+
+  if (fit && pts.length) {
+    try {
+      map.fitBounds(subsPointsGroup.getBounds().pad(0.2));
+    } catch {}
+  }
+}
 
 async function loadLocalPoints(force = false) {
   if (!force && localOk.value) return;
@@ -734,9 +767,12 @@ async function loadLocalPoints(force = false) {
     }
 
     localPoints.value = pts;
+    renderLocalPointsToMap({ fit: true });
+
     if (!pts.length) throw new Error("לא נמצאו נקודות בקובץ (בדוק mmPerYear / geometry)");
   } catch (e) {
     localPoints.value = [];
+    subsPointsGroup?.clearLayers?.();
     localErr.value = String(e);
   } finally {
     localLoading.value = false;
@@ -1070,6 +1106,7 @@ function initMap() {
 
   aoiGroup = new L.FeatureGroup().addTo(map);
   subsAoiGroup = new L.FeatureGroup().addTo(map);
+subsPointsGroup = new L.FeatureGroup().addTo(map);
 
   buildingsSinkingGroup = new L.FeatureGroup().addTo(map);
   buildingsStableGroup = new L.FeatureGroup().addTo(map);
@@ -1467,6 +1504,10 @@ function downloadCSV() {
   const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
   downloadBlob(`satmap_s1_${start.value}_${end.value}.csv`, blob);
 }
+  watch(subsThreshold, () => {
+  if (subsEngine.value === "local" && localOk.value) renderLocalPointsToMap();
+});
+
 
 /** ------------ UI helpers ------------ */
 function maybeClosePanelOnMobile() {
