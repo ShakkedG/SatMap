@@ -22,75 +22,77 @@
           <div class="bannerText">
             1) מציירים <b>מלבן</b> על המפה (זה האזור לבדיקה)<br />
             2) המערכת מושכת בניינים מ־OSM (Overpass)<br />
-            3) לכל בניין היא דוגמת שקיעה דרך ה־API שלך<br />
+            3) לכל בניין היא דוגמת שקיעה מתוך נתונים (מקומי/API)<br />
             4) מסמנת “שוקע” אם mm/yr ≤ הסף שלך<br /><br />
-            <b>שימו לב:</b> אמינות תלויה באיכות/צפיפות הנתונים שלך. אם יש מעט נקודות — זה יהיה “גס”.
+            <b>שימו לב:</b> אמינות תלויה באיכות/צפיפות הנתונים. אם יש מעט נקודות — זה יהיה “גס”.
           </div>
         </div>
 
+        <!-- STEP 1: Data source -->
         <div class="step">
           <div class="stepNum">1</div>
           <div class="stepBody">
-            <div class="stepTitle">חיבור ל־API</div>
+            <div class="stepTitle">מקור נתונים לשקיעה</div>
+            <div class="stepText">ב־GitHub Pages מומלץ לעבוד עם קובץ מקומי כדי לא להיתקע על חסימות/CORS.</div>
 
-            <div class="row">
+            <div class="row grid2">
+              <div>
+                <label>מצב</label>
+                <select v-model="subsDataMode">
+                  <option value="local">קובץ מקומי (מומלץ ל־GitHub Pages)</option>
+                  <option value="api">API (Cloudflare Worker)</option>
+                </select>
+              </div>
+              <div>
+                <label>סטטוס</label>
+                <div class="kpi" :class="{ good: subsDataOk, bad: !subsDataOk }">
+                  {{ subsDataOk ? "מוכן" : "לא מוכן" }}
+                </div>
+              </div>
+            </div>
+
+            <!-- LOCAL -->
+            <div v-if="subsDataMode === 'local'" class="row">
+              <label>נתיב קובץ (בריפו)</label>
+              <input v-model="localDataUrl" />
+              <div class="row grid2">
+                <button class="btnPrimary" @click="loadLocalPoints(true)" :disabled="localLoading">
+                  {{ localLoading ? "טוען…" : "טען נתונים" }}
+                </button>
+                <button class="btnGhost" @click="testLocalSample" :disabled="localLoading">
+                  בדיקת דגימה
+                </button>
+              </div>
+
+              <div class="mini" v-if="localMsg">{{ localMsg }}</div>
+              <div class="mini muted" v-if="localCount">
+                נקודות טעונות: <b>{{ localCount }}</b>
+              </div>
+            </div>
+
+            <!-- API -->
+            <div v-else class="row">
               <label>כתובת ה־API (Cloudflare Worker)</label>
               <input v-model="subsApiBase" placeholder="https://xxxxx.workers.dev" />
               <div class="mini muted" style="margin-top:6px;">
                 האתר קורא: <span class="mono">/subsidence?lat=..&lng=..&radius=..</span>
               </div>
-            </div>
-            <div class="step">
-  <div class="stepNum">3</div>
-  <div class="stepBody">
-    <div class="stepTitle">השוואה עם תצלומי עבר (Wayback)</div>
-    <div class="stepText">
-      זה רק להשוואה ויזואלית (מה השתנה בשטח), לא מדידת שקיעה.
-      הפעל שכבת “עבר” מעל לוויין Esri ושחק עם שקיפות.
-    </div>
 
-    <label class="chk" style="margin-top:6px;">
-      <input type="checkbox" v-model="compareEnabled" />
-      להפעיל תצלום עבר
-    </label>
-
-    <div v-if="compareEnabled" style="margin-top:10px;">
-      <div class="row grid2">
-        <div>
-          <label>תאריך עבר</label>
-          <select v-model="waybackSelected">
-            <option v-for="w in waybackItems" :key="w.releaseNum" :value="String(w.releaseNum)">
-              {{ w.releaseDateLabel || w.itemTitle }}
-            </option>
-          </select>
-        </div>
-        <div>
-          <label>שקיפות ({{ waybackOpacityPct }}%)</label>
-          <input type="range" min="0" max="100" v-model.number="waybackOpacityPct" />
-        </div>
-      </div>
-
-      <div class="mini muted" v-if="waybackLoading">טוען רשימת תצלומי עבר…</div>
-      <div class="mini" v-if="waybackErr">{{ waybackErr }}</div>
-    </div>
-  </div>
-</div>
-
-            
-
-            <div class="row grid2">
-              <button class="btnGhost" @click="testApi" :disabled="apiTesting">
-                {{ apiTesting ? "בודק…" : "בדיקת חיבור" }}
-              </button>
-              <div class="kpi" :class="{ bad: !apiOk, good: apiOk }">
-                {{ apiOk ? "API מחובר" : "לא בדוק / בעיה" }}
+              <div class="row grid2">
+                <button class="btnGhost" @click="testApi" :disabled="apiTesting">
+                  {{ apiTesting ? "בודק…" : "בדיקת חיבור" }}
+                </button>
+                <div class="kpi" :class="{ bad: !apiOk, good: apiOk }">
+                  {{ apiOk ? "API מחובר" : "לא בדוק / בעיה" }}
+                </div>
               </div>
-            </div>
 
-            <div class="mini" v-if="apiTestMsg">{{ apiTestMsg }}</div>
+              <div class="mini" v-if="apiTestMsg">{{ apiTestMsg }}</div>
+            </div>
           </div>
         </div>
 
+        <!-- STEP 2: Settings -->
         <div class="step">
           <div class="stepNum">2</div>
           <div class="stepBody">
@@ -122,7 +124,7 @@
             </div>
 
             <div class="row grid2">
-              <button class="btnPrimary" @click="scanSubsidenceInRect" :disabled="subsBusy || !apiOk">
+              <button class="btnPrimary" @click="scanSubsidenceInRect" :disabled="subsBusy || !subsDataOk">
                 {{ subsBusy ? "סורק…" : "סרוק את המלבן" }}
               </button>
               <button class="btnGhost" @click="stopSubsidenceScan" :disabled="!subsBusy">עצור</button>
@@ -167,14 +169,51 @@
             </div>
 
             <div class="mini muted" style="margin-top:8px;">
-              <b>איך להשתמש:</b> צייר <b>מלבן</b> על המפה → בדיקת חיבור → “סרוק את המלבן”.<br />
-              (במצב הזה אין פוליגונים, רק מלבן.)
+              <b>איך להשתמש:</b> צייר <b>מלבן</b> על המפה → ודא “מוכן” → “סרוק את המלבן”.
             </div>
           </div>
         </div>
 
-        <div class="step" v-if="subsResults.length">
+        <!-- STEP 3: Wayback -->
+        <div class="step">
           <div class="stepNum">3</div>
+          <div class="stepBody">
+            <div class="stepTitle">השוואה עם תצלומי עבר (Wayback)</div>
+            <div class="stepText">
+              זה רק להשוואה ויזואלית (מה השתנה בשטח), לא מדידת שקיעה.
+              הפעל שכבת “עבר” מעל לוויין Esri ושחק עם שקיפות.
+            </div>
+
+            <label class="chk" style="margin-top:6px;">
+              <input type="checkbox" v-model="compareEnabled" />
+              להפעיל תצלום עבר
+            </label>
+
+            <div v-if="compareEnabled" style="margin-top:10px;">
+              <div class="row grid2">
+                <div>
+                  <label>תאריך עבר</label>
+                  <select v-model="waybackSelected">
+                    <option v-for="w in waybackItems" :key="w.releaseNum" :value="String(w.releaseNum)">
+                      {{ w.releaseDateLabel || w.itemTitle }}
+                    </option>
+                  </select>
+                </div>
+                <div>
+                  <label>שקיפות ({{ waybackOpacityPct }}%)</label>
+                  <input type="range" min="0" max="100" v-model.number="waybackOpacityPct" />
+                </div>
+              </div>
+
+              <div class="mini muted" v-if="waybackLoading">טוען רשימת תצלומי עבר…</div>
+              <div class="mini" v-if="waybackErr">{{ waybackErr }}</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- RESULTS -->
+        <div class="step" v-if="subsResults.length">
+          <div class="stepNum">4</div>
           <div class="stepBody">
             <div class="stepTitle">תוצאות</div>
 
@@ -228,8 +267,8 @@
         <div class="banner info">
           <div class="bannerTitle">תצפיות לוויין = רשימה בלבד</div>
           <div class="bannerText">
-            כאן מקבלים <b>רשימת סצנות Sentinel-1</b> מה־ASF לפי מלבן ותאריכים.<br />
-            כדי לא לבלבל, <b>לא מציירים Footprints</b> על המפה (אין פוליגונים).
+            האתר שולח בקשה ל־ASF ומקבל <b>רשימת סצנות Sentinel-1</b> לפי מלבן ותאריכים.<br />
+            זה <b>לא</b> מחשב שקיעה — רק עוזר להבין אם יש כיסוי לאזור.
           </div>
         </div>
 
@@ -237,7 +276,7 @@
           <div class="stepNum">1</div>
           <div class="stepBody">
             <div class="stepTitle">בחר מלבן במפה</div>
-            <div class="stepText">צייר מלבן על המפה (בכל מצב יש רק מלבן).</div>
+            <div class="stepText">צייר מלבן על המפה.</div>
 
             <div class="row grid2">
               <button class="btnGhost" @click="resetIsraelAOI">Reset לישראל</button>
@@ -330,8 +369,8 @@
             <ul class="bul">
               <li>בחירת אזור במפה (מלבן פשוט)</li>
               <li>שליפת בניינים מ־OSM</li>
-              <li>דגימה דרך ה־Worker שלך + סיווג “שוקע/יציב/אין נתון”</li>
-              <li>הצגה על מפה ורשימה ברורה</li>
+              <li>דגימה מתוך נתונים (מקומי/API) + סיווג “שוקע/יציב/אין נתון”</li>
+              <li>הצגה על מפה ורשימה</li>
             </ul>
           </div>
         </div>
@@ -364,26 +403,6 @@
 </template>
 
 <script setup>
-  /** ====== Wayback compare (Historical imagery) ====== */
-const compareEnabled = ref(false);
-const waybackItems = ref([]); // [{releaseNum, releaseDateLabel, itemURL, itemTitle}]
-const waybackSelected = ref(""); // releaseNum as string
-const waybackOpacity = ref(0.55);
-const waybackLoading = ref(false);
-const waybackErr = ref("");
-
-const waybackOpacityPct = computed({
-  get: () => Math.round(waybackOpacity.value * 100),
-  set: (v) => (waybackOpacity.value = Math.max(0, Math.min(1, Number(v) / 100))),
-});
-
-let esriLayer = null;
-let waybackLayer = null;
-  let osmLayer = null;
-
-
-const WAYBACK_CONFIG_URL = "https://s3-us-west-2.amazonaws.com/config.maptiles.arcgis.com/waybackconfig.json";
-
 import { computed, onMounted, ref, watch } from "vue";
 
 import L from "leaflet";
@@ -403,32 +422,33 @@ L.Icon.Default.mergeOptions({
   shadowUrl: markerShadow,
 });
 
-/** Leaflet.draw readableArea patch */
-function patchLeafletDrawReadableArea() {
-  if (!L?.GeometryUtil) return;
-  L.GeometryUtil.readableArea = function (area, isMetric = true, precision = 2) {
-    const p = Number.isFinite(precision) ? precision : 2;
-    const a = Number(area);
-    if (!Number.isFinite(a) || a <= 0) return isMetric ? "0 מ״ר" : "0 ft²";
-    if (isMetric) {
-      if (a >= 1_000_000) return `${(a / 1_000_000).toFixed(p)} קמ״ר`;
-      return `${a.toFixed(p)} מ״ר`;
-    } else {
-      const ft2 = a * 10.763910416709722;
-      if (ft2 >= 27_878_400) return `${(ft2 / 27_878_400).toFixed(p)} mi²`;
-      return `${ft2.toFixed(p)} ft²`;
-    }
-  };
-}
-patchLeafletDrawReadableArea();
+/** ===== Wayback compare ===== */
+const compareEnabled = ref(false);
+const waybackItems = ref([]);
+const waybackSelected = ref("");
+const waybackOpacity = ref(0.55);
+const waybackLoading = ref(false);
+const waybackErr = ref("");
+
+const WAYBACK_CONFIG_URL =
+  "https://s3-us-west-2.amazonaws.com/config.maptiles.arcgis.com/waybackconfig.json";
+
+const waybackOpacityPct = computed({
+  get: () => Math.round(waybackOpacity.value * 100),
+  set: (v) => (waybackOpacity.value = Math.max(0, Math.min(1, Number(v) / 100))),
+});
+
+let osmLayer = null;
+let esriLayer = null;
+let waybackLayer = null;
 
 /** UI */
 const panelOpen = ref(true);
-const mode = ref("subsidence"); // subsidence | search | about
+const mode = ref("subsidence");
 const status = ref("צייר מלבן על המפה ואז התחל.");
 const busy = ref(false);
 
-/** Search (list only) */
+/** Search */
 const start = ref(daysAgoISO(60));
 const end = ref(todayISO());
 const flightDirection = ref("");
@@ -437,17 +457,31 @@ const limit = ref(50);
 const features = ref([]);
 
 /** Subsidence settings */
-const subsApiBase = ref("https://lucky-mouse-9360.shagolan28.workers.dev");
 const subsRadiusM = ref(1200);
 const subsThreshold = ref(-5);
 const subsMaxBuildings = ref(250);
 const subsConfidenceMode = ref("near"); // near | any
 
-/** Subsidence runtime */
+/** Subsidence source mode */
+const subsDataMode = ref("local"); // local | api
+const localDataUrl = ref(`${import.meta.env.BASE_URL}data/subsidence_points.geojson`);
+
+const subsApiBase = ref("https://lucky-mouse-9360.shagolan28.workers.dev");
+
+/** connection statuses */
 const apiOk = ref(false);
 const apiTesting = ref(false);
 const apiTestMsg = ref("");
 
+const localLoading = ref(false);
+const localMsg = ref("");
+const localCount = ref(0);
+const localOk = ref(false);
+
+/** unified ready flag */
+const subsDataOk = computed(() => (subsDataMode.value === "local" ? localOk.value : apiOk.value));
+
+/** runtime */
 const subsBusy = ref(false);
 const lastClick = ref(null);
 const subsMmPerYear = ref(null);
@@ -458,28 +492,21 @@ const subsProgressPercent = computed(() => {
   if (!t) return 0;
   return Math.max(0, Math.min(100, Math.round((subsProgress.value.done / t) * 100)));
 });
-
 const subsStats = ref({ totalChecked: 0, sinking: 0, stable: 0, noData: 0, tooFar: 0 });
 
-/** Results list */
+/** list */
 const subsResults = ref([]);
-const subsListFilter = ref("sinking"); // sinking | all | stable | nodata
-const subsSort = ref("rateAsc"); // rateAsc | distAsc
+const subsListFilter = ref("sinking");
+const subsSort = ref("rateAsc");
 
 const subsShown = computed(() => {
   let arr = subsResults.value.slice();
-  if (subsListFilter.value !== "all") {
-    arr = arr.filter((x) => x.status === subsListFilter.value);
-  }
+  if (subsListFilter.value !== "all") arr = arr.filter((x) => x.status === subsListFilter.value);
+
   if (subsSort.value === "distAsc") {
     arr.sort((a, b) => (a.nearestMeters ?? 9e15) - (b.nearestMeters ?? 9e15));
   } else {
-    // rateAsc: sinking more negative first, then nulls last
-    arr.sort((a, b) => {
-      const ra = a.mmPerYear ?? 9e15;
-      const rb = b.mmPerYear ?? 9e15;
-      return ra - rb;
-    });
+    arr.sort((a, b) => (a.mmPerYear ?? 9e15) - (b.mmPerYear ?? 9e15));
   }
   return arr;
 });
@@ -502,11 +529,9 @@ const showStableOnMap = ref(false);
 const showNoDataOnMap = ref(false);
 
 let clickMarker = null;
-
-/** Abort controller */
 let subsAbort = null;
 
-/** ------------ Date utils ------------ */
+/** ------------ small utils ------------ */
 function todayISO() {
   return new Date().toISOString().slice(0, 10);
 }
@@ -529,8 +554,6 @@ function fmtMeters(m) {
   if (n >= 1000) return `${(n / 1000).toFixed(2)} ק״מ`;
   return `${Math.round(n)} מ׳`;
 }
-
-/** ------------ Pills ------------ */
 function pillText(s) {
   if (s === "sinking") return "שוקע";
   if (s === "stable") return "יציב";
@@ -542,7 +565,132 @@ function pillClass(s) {
   return "mutedPill";
 }
 
-/** ------------ API test ------------ */
+/** haversine */
+function distM(lat1, lon1, lat2, lon2) {
+  const R = 6371000;
+  const toRad = (x) => (x * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(a));
+}
+
+/** ===== LOCAL POINTS CACHE (fast grid) ===== */
+let localPts = [];
+let localGrid = new Map();
+const GRID_DEG = 0.02; // ~2.2km in latitude (good enough for radius ~1.2km)
+
+function gridKey(lat, lng) {
+  const i = Math.floor(lat / GRID_DEG);
+  const j = Math.floor(lng / GRID_DEG);
+  return `${i}|${j}`;
+}
+function buildGrid(pts) {
+  const g = new Map();
+  for (const p of pts) {
+    const k = gridKey(p.lat, p.lng);
+    if (!g.has(k)) g.set(k, []);
+    g.get(k).push(p);
+  }
+  return g;
+}
+function neighborKeys(lat, lng) {
+  const i0 = Math.floor(lat / GRID_DEG);
+  const j0 = Math.floor(lng / GRID_DEG);
+  const keys = [];
+  for (let di = -1; di <= 1; di++) {
+    for (let dj = -1; dj <= 1; dj++) {
+      keys.push(`${i0 + di}|${j0 + dj}`);
+    }
+  }
+  return keys;
+}
+
+async function loadLocalPoints(force = false) {
+  if (!force && localOk.value && localPts.length) return;
+
+  localLoading.value = true;
+  localMsg.value = "";
+  localOk.value = false;
+  localCount.value = 0;
+
+  try {
+    const url = String(localDataUrl.value || "").trim();
+    if (!url) throw new Error("חסר נתיב לקובץ.");
+
+    const r = await fetch(url, { cache: "no-store" });
+    if (!r.ok) throw new Error(`טעינת GeoJSON נכשלה (${r.status})`);
+
+    const gj = await r.json();
+    const feats = Array.isArray(gj?.features) ? gj.features : [];
+
+    const pts = [];
+    for (const f of feats) {
+      if (f?.geometry?.type !== "Point") continue;
+      const c = f.geometry.coordinates;
+      if (!Array.isArray(c) || c.length < 2) continue;
+
+      const lng = Number(c[0]);
+      const lat = Number(c[1]);
+      const mm = Number(f?.properties?.mmPerYear);
+
+      if (!Number.isFinite(lat) || !Number.isFinite(lng) || !Number.isFinite(mm)) continue;
+      pts.push({ lat, lng, mmPerYear: mm });
+    }
+
+    if (!pts.length) throw new Error("לא נמצאו נקודות Point עם mmPerYear בקובץ.");
+
+    localPts = pts;
+    localGrid = buildGrid(localPts);
+    localCount.value = localPts.length;
+    localOk.value = true;
+    localMsg.value = `נטענו ${localPts.length} נקודות מהקובץ.`;
+    status.value = "נתוני שקיעה מקומיים מוכנים. צייר מלבן ואז סרוק.";
+  } catch (e) {
+    localOk.value = false;
+    localMsg.value = String(e);
+    status.value = `בעיה בנתונים מקומיים: ${String(e)}`;
+  } finally {
+    localLoading.value = false;
+  }
+}
+
+function sampleFromLocal(lat, lng, radiusMeters) {
+  if (!localPts.length) return { mmPerYear: null, nearestMeters: null };
+
+  const keys = neighborKeys(lat, lng);
+  let candidates = [];
+  for (const k of keys) {
+    const arr = localGrid.get(k);
+    if (arr && arr.length) candidates = candidates.concat(arr);
+  }
+  if (!candidates.length) candidates = localPts; // fallback
+
+  let best = null;
+  let bestD = Infinity;
+
+  for (const p of candidates) {
+    const d = distM(lat, lng, p.lat, p.lng);
+    if (d < bestD) {
+      bestD = d;
+      best = p;
+    }
+  }
+
+  if (!best) {
+    return { mmPerYear: null, nearestMeters: null };
+  }
+
+  if (bestD > radiusMeters) {
+    return { mmPerYear: null, nearestMeters: bestD };
+  }
+
+  return { mmPerYear: best.mmPerYear, nearestMeters: bestD };
+}
+
+/** ===== API test + call ===== */
 async function testApi() {
   apiTesting.value = true;
   apiTestMsg.value = "";
@@ -552,9 +700,10 @@ async function testApi() {
     if (!h.ok) throw new Error("health failed: " + h.status);
     const t = (await h.text()).trim();
 
-    const s = await fetch(`${base}/subsidence?lat=31.78&lng=35.22&radius=${encodeURIComponent(String(subsRadiusM.value))}`, {
-      cache: "no-store",
-    });
+    const s = await fetch(
+      `${base}/subsidence?lat=31.78&lng=35.22&radius=${encodeURIComponent(String(subsRadiusM.value))}`,
+      { cache: "no-store" }
+    );
     if (!s.ok) throw new Error("subsidence failed: " + s.status);
     const j = await s.json();
 
@@ -570,12 +719,11 @@ async function testApi() {
   }
 }
 
-/** ------------ Subsidence API call ------------ */
-async function fetchSubsidenceSample(lat, lng) {
+async function fetchSubsidenceSampleApi(lat, lng) {
   const base = subsApiBase.value.replace(/\/+$/, "");
-  const url = `${base}/subsidence?lat=${encodeURIComponent(String(lat))}&lng=${encodeURIComponent(String(lng))}&radius=${encodeURIComponent(
-    String(subsRadiusM.value)
-  )}`;
+  const url = `${base}/subsidence?lat=${encodeURIComponent(String(lat))}&lng=${encodeURIComponent(
+    String(lng)
+  )}&radius=${encodeURIComponent(String(subsRadiusM.value))}`;
 
   const r = await fetch(url, { signal: subsAbort?.signal, cache: "no-store" });
   if (!r.ok) throw new Error("Subsidence API failed: " + r.status);
@@ -588,6 +736,27 @@ async function fetchSubsidenceSample(lat, lng) {
     mmPerYear: Number.isFinite(mm) ? mm : null,
     nearestMeters: Number.isFinite(nearest) ? nearest : null,
   };
+}
+
+/** unified sample */
+async function getSubsidenceSample(lat, lng) {
+  if (subsDataMode.value === "local") {
+    if (!localOk.value) await loadLocalPoints(false);
+    const r = sampleFromLocal(lat, lng, Number(subsRadiusM.value) || 1200);
+    return r;
+  }
+  return fetchSubsidenceSampleApi(lat, lng);
+}
+
+async function testLocalSample() {
+  try {
+    await loadLocalPoints(false);
+    if (!localOk.value) return;
+    const s = sampleFromLocal(31.78, 35.22, Number(subsRadiusM.value) || 1200);
+    localMsg.value = `בדיקת דגימה: mmPerYear=${s.mmPerYear} | nearestMeters=${s.nearestMeters}`;
+  } catch (e) {
+    localMsg.value = String(e);
+  }
 }
 
 /** ------------ Overpass buildings ------------ */
@@ -699,13 +868,43 @@ function stopSubsidenceScan() {
 }
 
 /** ------------ Draw control (RECTANGLE ONLY) ------------ */
-function rebuildDrawControl() {
-  const aoiStyle = { color: "#111827", weight: 2, opacity: 0.9, fillOpacity: 0.06 };
-const subsStyle = { color: "#b91c1c", weight: 2, opacity: 0.95, fillOpacity: 0.06 };
+function patchLeafletDrawReadableArea() {
+  if (!L?.GeometryUtil) return;
+  L.GeometryUtil.readableArea = function (area, isMetric = true, precision = 2) {
+    const p = Number.isFinite(precision) ? precision : 2;
+    const a = Number(area);
+    if (!Number.isFinite(a) || a <= 0) return isMetric ? "0 מ״ר" : "0 ft²";
+    if (isMetric) {
+      if (a >= 1_000_000) return `${(a / 1_000_000).toFixed(p)} קמ״ר`;
+      return `${a.toFixed(p)} מ״ר`;
+    } else {
+      const ft2 = a * 10.763910416709722;
+      if (ft2 >= 27_878_400) return `${(ft2 / 27_878_400).toFixed(p)} mi²`;
+      return `${ft2.toFixed(p)} ft²`;
+    }
+  };
+}
 
+function applyAoiVisibility() {
   if (!map) return;
+  const isSubs = mode.value === "subsidence";
 
+  if (isSubs) {
+    if (map.hasLayer(aoiGroup)) map.removeLayer(aoiGroup);
+    if (!map.hasLayer(subsAoiGroup)) subsAoiGroup.addTo(map);
+  } else {
+    if (map.hasLayer(subsAoiGroup)) map.removeLayer(subsAoiGroup);
+    if (!map.hasLayer(aoiGroup)) aoiGroup.addTo(map);
+  }
+}
+
+function rebuildDrawControl() {
+  if (!map) return;
   patchLeafletDrawReadableArea();
+
+  const aoiStyle = { color: "#111827", weight: 2, opacity: 0.9, fillOpacity: 0.06 };
+  const subsStyle = { color: "#b91c1c", weight: 2, opacity: 0.95, fillOpacity: 0.06 };
+  const isSubs = mode.value === "subsidence";
 
   if (drawControl) {
     try {
@@ -714,25 +913,23 @@ const subsStyle = { color: "#b91c1c", weight: 2, opacity: 0.95, fillOpacity: 0.0
     drawControl = null;
   }
 
-  const isSubs = mode.value === "subsidence";
-  const style = isSubs ? { color: "#b91c1c", weight: 2, opacity: 0.95, fillOpacity: 0.06 } : { color: "#111827", weight: 2, opacity: 0.9, fillOpacity: 0.06 };
-
-drawControl = new L.Control.Draw({
-  draw: {
-    rectangle: { shapeOptions: isSubs ? subsStyle : aoiStyle },
-    polygon: false,
-    polyline: false,
-    circle: false,
-    marker: false,
-    circlemarker: false,
-  },
-  edit: { featureGroup: isSubs ? subsAoiGroup : aoiGroup },
-});
-
+  drawControl = new L.Control.Draw({
+    draw: {
+      rectangle: { shapeOptions: isSubs ? subsStyle : aoiStyle },
+      polygon: false,
+      polyline: false,
+      circle: false,
+      marker: false,
+      circlemarker: false,
+    },
+    edit: { featureGroup: isSubs ? subsAoiGroup : aoiGroup },
+  });
 
   map.addControl(drawControl);
 }
-  async function loadWaybackConfigOnce() {
+
+/** Wayback */
+async function loadWaybackConfigOnce() {
   if (waybackItems.value.length) return;
 
   waybackLoading.value = true;
@@ -751,11 +948,8 @@ drawControl = new L.Control.Draw({
       }))
       .filter((x) => x.releaseNum && x.itemURL);
 
-    // newest first
     arr.sort((a, b) => (b.releaseNum || 0) - (a.releaseNum || 0));
-
     waybackItems.value = arr;
-
     if (!waybackSelected.value && arr[0]) waybackSelected.value = String(arr[0].releaseNum);
   } catch (e) {
     waybackErr.value = "לא הצלחתי לטעון רשימת תצלומי עבר. " + String(e);
@@ -770,14 +964,15 @@ const WaybackTileLayer = L.TileLayer.extend({
     L.TileLayer.prototype.initialize.call(this, "", options);
   },
   getTileUrl(coords) {
-  const z = coords.z, x = coords.x, y = coords.y;
-  return this._item.itemURL
-    .replace("{releaseNum}", String(this._item.releaseNum))
-    .replace("{level}", String(z))
-    .replace("{row}", String(y))
-    .replace("{col}", String(x));
-}
-,
+    const z = coords.z,
+      x = coords.x,
+      y = coords.y;
+    return this._item.itemURL
+      .replace("{releaseNum}", String(this._item.releaseNum))
+      .replace("{level}", String(z))
+      .replace("{row}", String(y))
+      .replace("{col}", String(x));
+  },
 });
 
 function removeWaybackLayer() {
@@ -792,14 +987,12 @@ function removeWaybackLayer() {
 function applyWaybackLayer() {
   if (!map) return;
   removeWaybackLayer();
-
   if (!compareEnabled.value) return;
 
   const rel = Number(waybackSelected.value);
   const item = waybackItems.value.find((x) => Number(x.releaseNum) === rel);
   if (!item) return;
 
-  // מומלץ להשוואה: לעבוד על שכבת הלוויין הרגילה ואז להלביש “עבר” מעליה
   if (esriLayer && !map.hasLayer(esriLayer)) esriLayer.addTo(map);
 
   waybackLayer = new WaybackTileLayer(item, {
@@ -812,32 +1005,31 @@ function applyWaybackLayer() {
   waybackLayer.addTo(map);
 }
 
-
 /** ------------ initMap ------------ */
 function initMap() {
   map = L.map("map", { zoomControl: true, maxZoom: 22, zoomSnap: 0.25 }).setView([31.78, 35.22], 11);
 
-  const osm = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+  osmLayer = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
     maxNativeZoom: 19,
     maxZoom: 22,
     attribution: "&copy; OpenStreetMap",
   }).addTo(map);
 
- esriLayer = L.tileLayer(
-  "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-  { maxNativeZoom: 19, maxZoom: 22, attribution: "Tiles © Esri" }
-);
+  esriLayer = L.tileLayer(
+    "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+    { maxNativeZoom: 19, maxZoom: 22, attribution: "Tiles © Esri" }
+  );
 
+  L.control.layers({ "מפה (OSM)": osmLayer, "לוויין (Esri)": esriLayer }, {}, { position: "topleft" }).addTo(map);
 
-  L.control.layers({ "מפה (OSM)": osm, "לוויין (Esri)": esriLayer }, {}, { position: "topleft" }).addTo(map);
-
-  aoiGroup = new L.FeatureGroup().addTo(map);
-  subsAoiGroup = new L.FeatureGroup().addTo(map);
+  aoiGroup = new L.FeatureGroup();
+  subsAoiGroup = new L.FeatureGroup();
 
   buildingsSinkingGroup = new L.FeatureGroup().addTo(map);
   buildingsStableGroup = new L.FeatureGroup().addTo(map);
   buildingsNoDataGroup = new L.FeatureGroup().addTo(map);
 
+  applyAoiVisibility();
   resetIsraelAOI();
   rebuildDrawControl();
   applyBuildingsVisibility();
@@ -855,22 +1047,22 @@ function initMap() {
       status.value = "מלבן נבחר. לחץ “חפש סצנות”.";
     }
   });
+
   map.on(L.Draw.Event.EDITED, () => {
-  status.value = "המלבן עודכן.";
-});
+    status.value = "המלבן עודכן.";
+  });
 
-map.on(L.Draw.Event.DELETED, () => {
-  if (mode.value === "subsidence") {
-    subsRect = null;
-    subsAoiGroup?.clearLayers?.();
-    status.value = "מלבן בדיקה נמחק.";
-  } else {
-    aoiRect = null;
-    aoiGroup?.clearLayers?.();
-    status.value = "מלבן חיפוש נמחק.";
-  }
-});
-
+  map.on(L.Draw.Event.DELETED, () => {
+    if (mode.value === "subsidence") {
+      subsRect = null;
+      subsAoiGroup.clearLayers();
+      status.value = "מלבן בדיקה נמחק.";
+    } else {
+      aoiRect = null;
+      aoiGroup.clearLayers();
+      status.value = "מלבן חיפוש נמחק.";
+    }
+  });
 
   map.on("click", async (e) => {
     if (mode.value !== "subsidence") return;
@@ -882,7 +1074,7 @@ map.on(L.Draw.Event.DELETED, () => {
     clickMarker = L.marker([lat, lng]).addTo(map);
 
     try {
-      const s = await fetchSubsidenceSample(lat, lng);
+      const s = await getSubsidenceSample(lat, lng);
       subsMmPerYear.value = s.mmPerYear;
       status.value =
         s.mmPerYear == null
@@ -897,33 +1089,39 @@ map.on(L.Draw.Event.DELETED, () => {
 
 /** ------------ AOI helpers ------------ */
 function resetIsraelAOI() {
-  aoiGroup?.clearLayers?.();
-  subsAoiGroup?.clearLayers?.();
-
   const rect = L.rectangle([
     [29.45, 34.2],
     [33.4, 35.95],
   ]);
 
   if (mode.value === "subsidence") {
+    subsAoiGroup.clearLayers();
     subsRect = rect;
     subsAoiGroup.addLayer(rect);
+    if (map && !map.hasLayer(subsAoiGroup)) subsAoiGroup.addTo(map);
   } else {
+    aoiGroup.clearLayers();
     aoiRect = rect;
     aoiGroup.addLayer(rect);
+    if (map && !map.hasLayer(aoiGroup)) aoiGroup.addTo(map);
   }
 
   map?.fitBounds?.(rect.getBounds(), { padding: [20, 20], maxZoom: 11 });
 }
+
 function clearAOI() {
-  aoiGroup?.clearLayers?.();
-  aoiRect = null;
+  if (mode.value === "subsidence") {
+    subsAoiGroup?.clearLayers?.();
+    subsRect = null;
+  } else {
+    aoiGroup?.clearLayers?.();
+    aoiRect = null;
+  }
 }
 
-/** ------------ ASF search (NO MAP POLYGONS) ------------ */
+/** ------------ ASF search ------------ */
 function layerToWktRect(layer) {
   const b = layer.getBounds();
-  // POLYGON((lng lat, ...))
   const pts = [
     [b.getWest(), b.getSouth()],
     [b.getEast(), b.getSouth()],
@@ -1024,7 +1222,7 @@ function approxBboxAreaKm2(b) {
 
 function applyBuildingsVisibility() {
   if (!map) return;
-  // sinking always visible
+
   if (!map.hasLayer(buildingsSinkingGroup)) buildingsSinkingGroup.addTo(map);
 
   if (showStableOnMap.value) {
@@ -1041,16 +1239,15 @@ function applyBuildingsVisibility() {
 }
 
 async function scanSubsidenceInRect() {
-  // קח מלבן מה-state או מה-group
   const rect = subsRect || (subsAoiGroup?.getLayers?.()?.[0] ?? null);
   if (!rect) {
-    status.value = "אין מלבן. במצב 'בניינים שוקעים' צייר מלבן על המפה ואז נסה שוב.";
+    status.value = "אין מלבן. צייר מלבן על המפה ואז נסה שוב.";
     return;
   }
   subsRect = rect;
 
-  if (!apiOk.value) {
-    status.value = "ה-API לא מחובר. לחץ קודם 'בדיקת חיבור' ואז סרוק.";
+  if (!subsDataOk.value) {
+    status.value = "מקור נתונים לא מוכן. במצב מקומי לחץ 'טען נתונים', או בדוק API.";
     return;
   }
 
@@ -1062,10 +1259,16 @@ async function scanSubsidenceInRect() {
     clearSubsidenceResults();
     applyBuildingsVisibility();
 
+    // ensure local points are loaded if needed
+    if (subsDataMode.value === "local" && !localOk.value) {
+      await loadLocalPoints(false);
+      if (!localOk.value) throw new Error("נתונים מקומיים לא נטענו.");
+    }
+
     subsProgress.value = { stage: "טוען בניינים (OSM)…", done: 0, total: 1 };
     status.value = "טוען בניינים (OSM)…";
 
-    const b = rect.getBounds();   // ✅ לא subsRect / לא subsAoi
+    const b = rect.getBounds();
     const area = approxBboxAreaKm2(b);
     if (area > 25) throw new Error("המלבן גדול מדי. תצמצם כדי לא להפיל את Overpass.");
 
@@ -1079,7 +1282,10 @@ async function scanSubsidenceInRect() {
     subsProgress.value = { stage: "בודק שקיעה לכל בניין…", done: 0, total: list.length };
     status.value = `נמצאו ${all.length} בניינים. בודק עד ${list.length}…`;
 
-    let noData = 0, tooFar = 0, sinking = 0, stable = 0;
+    let noData = 0,
+      tooFar = 0,
+      sinking = 0,
+      stable = 0;
     const results = [];
 
     for (let i = 0; i < list.length; i++) {
@@ -1087,9 +1293,12 @@ async function scanSubsidenceInRect() {
 
       const f = list[i];
       const cc = featureCentroidLatLng(f);
-      if (!cc) { subsProgress.value.done = i + 1; continue; }
+      if (!cc) {
+        subsProgress.value.done = i + 1;
+        continue;
+      }
 
-      const s = await fetchSubsidenceSample(cc.lat, cc.lng);
+      const s = await getSubsidenceSample(cc.lat, cc.lng);
 
       let statusKey = "nodata";
       if (s.mmPerYear == null) {
@@ -1102,8 +1311,13 @@ async function scanSubsidenceInRect() {
             continue;
           }
         }
-        if (s.mmPerYear <= subsThreshold.value) { statusKey = "sinking"; sinking++; }
-        else { statusKey = "stable"; stable++; }
+        if (s.mmPerYear <= subsThreshold.value) {
+          statusKey = "sinking";
+          sinking++;
+        } else {
+          statusKey = "stable";
+          stable++;
+        }
       }
 
       const name = buildingLabel(f.properties || {});
@@ -1121,7 +1335,6 @@ async function scanSubsidenceInRect() {
       if ((i + 1) % 25 === 0) status.value = `בודק… ${i + 1}/${list.length}`;
     }
 
-    // ציור שכבות (כמו אצלך) – נשאר אותו רעיון
     for (const r of results) {
       const style =
         r.status === "sinking"
@@ -1133,15 +1346,21 @@ async function scanSubsidenceInRect() {
       const layer = L.geoJSON(r.feature, { style });
 
       layer.on("click", () => {
-        try { map.fitBounds(layer.getBounds(), { padding: [20, 20], maxZoom: 19 }); } catch {}
-        layer.bindPopup(`
+        try {
+          map.fitBounds(layer.getBounds(), { padding: [20, 20], maxZoom: 19 });
+        } catch {}
+        layer
+          .bindPopup(
+            `
           <div style="font-family:system-ui;font-size:12px;line-height:1.45;">
             <div style="font-weight:800;margin-bottom:6px;">${r.name}</div>
             <div><b>סטטוס:</b> ${pillText(r.status)}</div>
             <div><b>קצב:</b> ${r.mmPerYear == null ? "—" : r.mmPerYear.toFixed(2) + " mm/yr"}</div>
             <div><b>מרחק:</b> ${fmtMeters(r.nearestMeters)}</div>
           </div>
-        `).openPopup();
+        `
+          )
+          .openPopup();
       });
 
       r._layer = layer;
@@ -1155,7 +1374,6 @@ async function scanSubsidenceInRect() {
     subsProgress.value = { stage: "", done: 0, total: 0 };
 
     status.value = `סיום: שוקעים=${sinking} | יציב=${stable} | אין נתון=${noData} | נפסלו(רחוק)=${tooFar}`;
-
     applyBuildingsVisibility();
   } catch (e) {
     status.value = `שגיאה בסריקה: ${String(e)}`;
@@ -1163,7 +1381,6 @@ async function scanSubsidenceInRect() {
     subsBusy.value = false;
   }
 }
-
 
 function focusSubsBuilding(b) {
   try {
@@ -1174,7 +1391,7 @@ function focusSubsBuilding(b) {
   } catch {}
 }
 
-/** ------------ Downloads ------------ */
+/** downloads */
 function downloadBlob(name, blob) {
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
@@ -1203,13 +1420,12 @@ function downloadCSV() {
   downloadBlob(`satmap_s1_${start.value}_${end.value}.csv`, blob);
 }
 
-/** ------------ UI helpers ------------ */
 function maybeClosePanelOnMobile() {
   if (window.matchMedia("(max-width: 900px)").matches) panelOpen.value = false;
 }
 
-/** ------------ mode switch ------------ */
-  watch(compareEnabled, async (v) => {
+/** watchers */
+watch(compareEnabled, async (v) => {
   if (!v) {
     removeWaybackLayer();
     return;
@@ -1231,24 +1447,37 @@ watch(waybackOpacity, () => {
 });
 
 watch(mode, (m) => {
+  applyAoiVisibility();
   rebuildDrawControl();
 
-  if (m === "subsidence") {
-    status.value = "בניינים שוקעים: צייר מלבן → בדוק API → סרוק.";
-  } else if (m === "search") {
-    status.value = "תצפיות לוויין: צייר מלבן → חפש → קבל רשימה (בלי פוליגונים).";
+  if (m === "subsidence") status.value = "בניינים שוקעים: צייר מלבן → ודא 'מוכן' → סרוק.";
+  else if (m === "search") status.value = "תצפיות לוויין: צייר מלבן → חפש → קבל רשימה.";
+  else status.value = "הסבר: מה יש היום ומה צריך כדי שזה יהיה מוצר אמיתי.";
+});
+
+watch(subsDataMode, async (m) => {
+  // reset statuses when switching
+  status.value = m === "local" ? "מצב מקומי: לחץ 'טען נתונים' ואז סרוק." : "מצב API: בדוק חיבור ואז סרוק.";
+  if (m === "local") {
+    apiOk.value = false;
+    apiTestMsg.value = "";
+    await loadLocalPoints(false);
   } else {
-    status.value = "הסבר: מה יש היום ומה צריך כדי שזה יהיה מוצר אמיתי.";
+    localOk.value = false;
+    localMsg.value = "";
   }
 });
 
-/** ------------ mount ------------ */
-onMounted(() => {
+/** mount */
+onMounted(async () => {
   initMap();
+  // default: load local once
+  await loadLocalPoints(false);
 });
 </script>
 
 <style>
+/* (ה־CSS שלך נשאר אותו דבר) */
 .layout {
   display: grid;
   grid-template-columns: 420px 1fr;
