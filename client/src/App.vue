@@ -1576,7 +1576,7 @@ button {
 /* mobile */
 @media (max-width: 900px) {
   .layout {
-    grid-template-columns: 1fr; 
+    grid-template-columns: 1fr;
   }
   .panel {
     position: absolute;
