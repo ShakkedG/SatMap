@@ -4,7 +4,7 @@
       <div class="top">
         <div>
           <div class="title">SatMap</div>
-          <div class="sub">Prototype – שקיעה + גובה (מ־DEM לווייני)</div>
+          <div class="sub">Prototype – בניינים + InSAR (P-SBAS CSV) + Δגובה</div>
         </div>
         <div class="topBtns">
           <button class="btn ghost" @click="fitToLayer" :disabled="!allBoundsValid">התמקד בשכבה</button>
@@ -15,11 +15,12 @@
       <div class="box">
         <div class="row2">
           <div>
-            <label>סף “שוקע” (mm/yr)</label>
+            <label>סף “שוקע/חשוד” v (mm/yr)</label>
             <input type="number" v-model.number="rateThreshold" step="0.5" />
+            <div class="hint">טיפ: התחל ב־-2 (מבוסס ספרות), ואז כוון לפי הנתונים שלך</div>
           </div>
           <div>
-            <label>X שנים אחורה להשוואת גובה</label>
+            <label>X שנים אחורה להשוואה</label>
             <input type="number" v-model.number="yearsBack" step="0.5" min="0.5" />
             <div class="hint">מומלץ: 3–5 שנים</div>
           </div>
@@ -27,30 +28,29 @@
 
         <div class="row2">
           <div>
-            <label>סף “שוקע” לפי Δh מצטבר (mm)</label>
-            <input type="number" v-model.number="deltaThreshold" step="1" />
-            <div class="hint">אם אין שדה Δh בקובץ → Δh = v×שנים</div>
+            <label>Buffer שיוך נקודות לבניין (מטר)</label>
+            <input type="number" v-model.number="joinBufferM" step="0.5" min="0" />
+            <div class="hint">ברירת מחדל 2m (נפוץ במחקרים בגלל דיוק מיקום נקודות InSAR)</div>
           </div>
           <div>
-            <label>צביעה לפי</label>
+            <label>צבע “שוקעים” לפי</label>
             <select v-model="colorBy">
               <option value="status">סטטוס</option>
-              <option value="rate">מהירות</option>
-              <option value="delta">Δh מצטבר</option>
+              <option value="rate">חומרה לפי v</option>
+              <option value="delta">חומרה לפי Δh</option>
             </select>
-            <div class="hint">“סטטוס” נותן צבע ברור; “מהירות/Δh” נותן אדום לפי חומרה</div>
           </div>
         </div>
 
         <div class="row2">
-          <div>
-            <label>שם שדה מהירות (אופציונלי)</label>
-            <input v-model="forcedRateField" placeholder="למשל mmPerYear" />
-          </div>
-          <div>
-            <label>שם שדה Δh מצטבר (אופציונלי)</label>
-            <input v-model="forcedDeltaField" placeholder="למשל dH_mm / delta_mm" />
-          </div>
+          <label class="chk">
+            <input type="checkbox" v-model="flipSign" />
+            היפוך סימן (אם מרגיש שהשקיעה יוצאת “הפוך”)
+          </label>
+          <label class="chk">
+            <input type="checkbox" v-model="assumeVerticalOnly" />
+            הנחת תנועה אנכית בלבד (שימוש ב־cosU אם קיים)
+          </label>
         </div>
 
         <div class="row2">
@@ -64,8 +64,19 @@
           </label>
         </div>
 
+        <div class="row2">
+          <label class="chk">
+            <input type="checkbox" v-model="showInsarPoints" @change="renderInsarPointsLayer" :disabled="!insar.loaded" />
+            להציג נקודות InSAR על המפה
+          </label>
+          <div class="hint" style="margin-top:10px">
+            InSAR: <b>{{ insar.loaded ? `${insar.count} נקודות נטענו` : "לא נטען" }}</b>
+            <span v-if="insar.msg" class="muted"> — {{ insar.msg }}</span>
+          </div>
+        </div>
+
         <div class="kpis">
-          <div class="kpi"><div class="k">סה״כ</div><div class="v">{{ stats.total }}</div></div>
+          <div class="kpi"><div class="k">סה״כ בניינים</div><div class="v">{{ stats.total }}</div></div>
           <div class="kpi sink"><div class="k">שוקעים/חשודים</div><div class="v">{{ stats.sinking }}</div></div>
           <div class="kpi stable"><div class="k">יציב/עולה</div><div class="v">{{ stats.stable }}</div></div>
           <div class="kpi nodata"><div class="k">אין נתון</div><div class="v">{{ stats.noData }}</div></div>
@@ -75,70 +86,70 @@
         <div class="mini err" v-if="loadErr">{{ loadErr }}</div>
 
         <div class="legend">
-          <div class="legRow"><span class="sw sw-sink"></span> שוקע/חשוד (v ≤ {{ rateThreshold }} או Δh ≤ {{ deltaThreshold }})</div>
+          <div class="legRow"><span class="sw sw-sink"></span> שוקע/חשוד (v ≤ {{ rateThreshold }})</div>
           <div class="legRow"><span class="sw sw-stable"></span> יציב/עולה</div>
-          <div class="legRow"><span class="sw sw-nodata"></span> אין נתון</div>
+          <div class="legRow"><span class="sw sw-nodata"></span> אין נתון (אין נקודות InSAR לבניין)</div>
         </div>
       </div>
 
-      <!-- מקרא נתונים מפורט -->
       <details class="box" open>
-        <summary class="sumTitle">מקרא נתונים – איך כל מספר מחושב</summary>
+        <summary class="sumTitle">מקרא נתונים – איך האתר משיג ומחשב כל דבר</summary>
 
         <div class="gloss">
           <div class="glRow">
+            <div class="glKey">מקור הנתונים</div>
+            <div class="glVal">
+              קובץ נקודות InSAR: <span class="mono">data/insar_points.csv</span> (מומלץ P-SBAS).<br/>
+              לכל נקודה יש Lat/Lon, Vel, Coer, Topo (ועוד).
+              <div class="hint">אם הקובץ לא קיים/ריק → כל הבניינים יהיו “אין נתון”.</div>
+            </div>
+          </div>
+
+          <div class="glRow">
             <div class="glKey">v (mm/yr)</div>
             <div class="glVal">
-              “מהירות שקיעה/תזוזה לשנה”. נשלף משדה בקובץ הפוליגונים:
+              מהירות תזוזה שנתית:
               <ul>
-                <li>אם מילאת “שם שדה מהירות” – משתמשים בדיוק בו.</li>
-                <li>אחרת: מחפשים שמות נפוצים (mmPerYear / mm_yr / velocity / subsidence וכו׳).</li>
-                <li>אם לא נמצא שדה מתאים – v יוצג כ־—.</li>
+                <li>מה-CSV: <span class="mono">Vel</span> הוא <b>cm/year</b> → ממירים ל-mm/year: <span class="mono">v = Vel×10</span></li>
+                <li>הערכים הם LOS. אם מסומן “אנכי בלבד”, מחלקים ב-<span class="mono">cosU</span> (אם קיים) בהנחה שהתנועה רק אנכית.</li>
+                <li>לכל בניין לוקחים <b>מדיאן</b> של v מכל הנקודות בתוך/עד Buffer סביב הפוליגון.</li>
               </ul>
             </div>
           </div>
 
           <div class="glRow">
-            <div class="glKey">Δh (mm)</div>
+            <div class="glKey">Δh ב־X שנים (mm)</div>
             <div class="glVal">
-              “שינוי גובה מצטבר”:
-              <ul>
-                <li>אם יש שדה Δh בקובץ (כמו delta_mm / dH_mm) – משתמשים בו.</li>
-                <li>אחרת מחשבים: <span class="mono">Δh = v × X</span>, כאשר X = מספר השנים שבחרת.</li>
-              </ul>
+              שינוי מצטבר:
+              <div class="mono">Δh = v × X</div>
+              <div class="hint">אם v שלילי → שקיעה (גובה קטן עם הזמן).</div>
             </div>
           </div>
 
           <div class="glRow">
-            <div class="glKey">גובה עכשיו (m)</div>
+            <div class="glKey">Topo / “גובה עכשיו” (m)</div>
             <div class="glVal">
-              מחושב *לא מתוך הקובץ* אלא ממודל גבהים לווייני (DEM) דרך Elevation API:
-              <ul>
-                <li>לוקחים נקודת דגימה מייצגת לכל בניין: מרכז ה־bounds של הפוליגון.</li>
-                <li>שולחים בקשה ל־API: מחזיר גובה במטרים.</li>
-                <li>זה בד״כ גובה קרקע/שטח ברזולוציה גסה (לא גובה גג מדויק).</li>
-              </ul>
-              <div class="hint">יחידות: m = מטרים, mm = מילימטרים. המרה: 1000mm = 1m.</div>
+              מה-CSV: <span class="mono">Topo</span> = גובה במטרים (מעל אליפסואיד).<br/>
+              לבניין לוקחים <b>מדיאן</b> של Topo של הנקודות ששויכו אליו.
+              <div class="hint">זה לא “גובה בניין”, אלא גובה הנקודות/הקרקע/היעד כפי שמוגדר בתוצר.</div>
             </div>
           </div>
 
           <div class="glRow">
             <div class="glKey">גובה לפני X שנים (m)</div>
             <div class="glVal">
-              נגזר מהגובה הלווייני ומהשינוי:
-              <div class="mono">heightPast = heightNow - (Δh / 1000)</div>
-              <div class="hint">אם Δh שלילי (שקיעה) → בעבר היה גבוה יותר.</div>
+              נגזר מהגובה ומהשינוי:
+              <div class="mono">TopoPast = TopoNow - (Δh / 1000)</div>
             </div>
           </div>
 
           <div class="glRow">
-            <div class="glKey">סטטוס</div>
+            <div class="glKey">איכות/אמינות</div>
             <div class="glVal">
-              נקבע לפי הספים:
+              מציגים:
               <ul>
-                <li>“שוקע/חשוד” אם <span class="mono">v ≤ rateThreshold</span> או <span class="mono">Δh ≤ deltaThreshold</span></li>
-                <li>“אין נתון” אם אין גם v וגם Δh</li>
-                <li>אחרת “יציב/עולה”</li>
+                <li><b>#points</b> = כמה נקודות InSAR שויכו לבניין</li>
+                <li><b>Coer</b> = Temporal Coherence (מדיאן) — גבוה יותר בדרך כלל אמין יותר</li>
               </ul>
             </div>
           </div>
@@ -158,37 +169,43 @@
           </div>
 
           <div class="selCard">
-            <div class="k">מהירות v (mm/yr)</div>
+            <div class="k">נקודות InSAR לבניין</div>
+            <div class="v mono">{{ selected.psCountLabel }}</div>
+            <div class="hint">Buffer: {{ joinBufferM }}m</div>
+          </div>
+
+          <div class="selCard">
+            <div class="k">v (mm/yr)</div>
             <div class="v mono">{{ selected.rateLabel }}</div>
-            <div class="hint" v-if="selected.rateField">שדה: <span class="mono">{{ selected.rateField }}</span></div>
+            <div class="hint" v-if="selected.rateMode">{{ selected.rateMode }}</div>
+          </div>
+
+          <div class="selCard">
+            <div class="k">Coherence (מדיאן)</div>
+            <div class="v mono">{{ selected.cohLabel }}</div>
+          </div>
+
+          <div class="selCard">
+            <div class="k">Topo עכשיו (m)</div>
+            <div class="v mono">{{ selected.topoNowLabel }}</div>
+          </div>
+
+          <div class="selCard">
+            <div class="k">Topo לפני {{ yearsBack }} שנים (m)</div>
+            <div class="v mono">{{ selected.topoPastLabel }}</div>
           </div>
 
           <div class="selCard">
             <div class="k">Δh ב־{{ yearsBack }} שנים (mm)</div>
             <div class="v mono">{{ selected.deltaLabel }}</div>
-            <div class="hint" v-if="selected.deltaSourceLabel">מקור: {{ selected.deltaSourceLabel }}</div>
-            <div class="hint" v-if="selected.deltaField">שדה: <span class="mono">{{ selected.deltaField }}</span></div>
           </div>
 
           <div class="selCard">
-            <div class="k">גובה עכשיו (m) – מהלווין</div>
-            <div class="v mono">{{ selected.heightNowLabel }}</div>
-            <div class="hint" v-if="selected.heightErr" style="color:#b91c1c">שגיאת גובה: {{ selected.heightErr }}</div>
+            <div class="k">הערה</div>
+            <div class="v" style="font-weight:700;font-size:12px;line-height:1.4">
+              {{ selected.note }}
+            </div>
           </div>
-
-          <div class="selCard">
-            <div class="k">גובה לפני {{ yearsBack }} שנים (m)</div>
-            <div class="v mono">{{ selected.heightPastLabel }}</div>
-          </div>
-
-          <div class="selCard">
-            <div class="k">Δגובה (m)</div>
-            <div class="v mono">{{ selected.heightDiffLabel }}</div>
-          </div>
-        </div>
-
-        <div class="mini muted" v-if="selected.heightInfo">
-          {{ selected.heightInfo }}
         </div>
       </div>
     </aside>
@@ -204,19 +221,21 @@ import { onMounted, ref, watch } from "vue";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 
-const tlvGeoUrl = `${import.meta.env.BASE_URL}data/tlvex.geojson`;
+const buildingsUrl = `${import.meta.env.BASE_URL}data/tlvex.geojson`;
+const insarCsvUrl  = `${import.meta.env.BASE_URL}data/insar_points.csv`;
 
-/** ===== UI state ===== */
+/** UI */
 const yearsBack = ref(3);
-const rateThreshold = ref(-5);
-const deltaThreshold = ref(-10);
+const rateThreshold = ref(-2); // mm/yr (שלילי = שקיעה)
 const colorBy = ref("status");
 
-const forcedRateField = ref("");
-const forcedDeltaField = ref("");
+const joinBufferM = ref(2);
+const flipSign = ref(false);
+const assumeVerticalOnly = ref(false);
 
 const showStable = ref(true);
 const showNoData = ref(false);
+const showInsarPoints = ref(false);
 
 const loadMsg = ref("");
 const loadErr = ref("");
@@ -224,105 +243,373 @@ const loadErr = ref("");
 const stats = ref({ total: 0, sinking: 0, stable: 0, noData: 0 });
 const selected = ref(null);
 
-/** ===== Leaflet state ===== */
+const insar = ref({ loaded: false, count: 0, msg: "", err: "" });
+
+/** Leaflet */
 let map = null;
 let sinkingGroup = null;
 let stableGroup = null;
 let noDataGroup = null;
+let insarPointsGroup = null;
 
 let allBounds = null;
 const allBoundsValid = ref(false);
 
-let layerControl = null;
-
-/** ===== Height from satellite DEM (Elevation API) ===== */
-const elevationCache = new Map(); // key -> number (meters)
-const elevPending = new Set();    // key currently fetching
-
-async function fetchElevationMeters(lat, lon) {
-  const url = `https://api.open-elevation.com/api/v1/lookup?locations=${lat},${lon}`;
-  const r = await fetch(url, { cache: "no-store" });
-  if (!r.ok) throw new Error("Elevation API HTTP " + r.status);
-  const j = await r.json();
-  const elev = j?.results?.[0]?.elevation;
-  const n = Number(elev);
-  if (!Number.isFinite(n)) throw new Error("Elevation missing/invalid");
-  return n;
-}
-
-async function getHeightNowFromSatellite(key, latlng) {
-  if (elevationCache.has(key)) return elevationCache.get(key);
-
-  if (elevPending.has(key)) return null;
-  elevPending.add(key);
-
-  try {
-    const h = await fetchElevationMeters(latlng.lat, latlng.lng);
-    elevationCache.set(key, h);
-    return h;
-  } finally {
-    elevPending.delete(key);
-  }
-}
+/** InSAR in-memory */
+let insarPoints = []; // {lat, lon, vel_cm_yr, vel_mm_yr, coher, topo_m, cosU}
+let grid = null;
+const GRID_DEG = 0.002; // ~200m (lat)
 
 /** ===== Helpers ===== */
 function toNum(v) {
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
 }
-function fmt2(n) {
-  return n == null ? "—" : Number(n).toFixed(2);
-}
-function fmt1(n) {
-  return n == null ? "—" : Number(n).toFixed(1);
+function fmt2(n) { return n == null ? "—" : Number(n).toFixed(2); }
+function fmt3(n) { return n == null ? "—" : Number(n).toFixed(3); }
+function fmtInt(n) { return n == null ? "—" : String(Math.round(n)); }
+
+function median(arr) {
+  const a = arr.filter(x => Number.isFinite(x)).slice().sort((x,y)=>x-y);
+  if (!a.length) return null;
+  const m = Math.floor(a.length/2);
+  return a.length % 2 ? a[m] : (a[m-1] + a[m]) / 2;
 }
 
-function pickRateField(props) {
-  const forced = String(forcedRateField.value || "").trim();
-  if (forced && props && Object.prototype.hasOwnProperty.call(props, forced)) return forced;
+/** CSV parsing (פשוט + מספיק לתוצרים סטנדרטיים) */
+function parseCsv(text) {
+  const lines = text.split(/\r?\n/).filter(l => l.trim().length);
+  if (!lines.length) return { headers: [], rows: [] };
 
-  const candidates = [
-    "mmPerYear","mm_per_year","mm_yr","mmYr",
-    "rate","velocity","vel","subsidence","sink","value","v"
-  ];
+  const headers = splitCsvLine(lines[0]).map(s => s.trim());
+  const rows = [];
+
+  for (let i=1; i<lines.length; i++) {
+    const cols = splitCsvLine(lines[i]);
+    if (!cols.length) continue;
+    const obj = {};
+    for (let j=0; j<headers.length; j++) obj[headers[j]] = cols[j] ?? "";
+    rows.push(obj);
+  }
+  return { headers, rows };
+}
+
+function splitCsvLine(line) {
+  const out = [];
+  let cur = "";
+  let inQ = false;
+
+  for (let i=0; i<line.length; i++) {
+    const ch = line[i];
+    if (ch === '"') {
+      if (inQ && line[i+1] === '"') { cur += '"'; i++; }
+      else inQ = !inQ;
+      continue;
+    }
+    if (ch === "," && !inQ) { out.push(cur); cur = ""; continue; }
+    cur += ch;
+  }
+  out.push(cur);
+  return out;
+}
+
+function pickField(obj, candidates) {
+  if (!obj) return "";
   for (const k of candidates) {
-    if (props && Object.prototype.hasOwnProperty.call(props, k)) return k;
+    if (Object.prototype.hasOwnProperty.call(obj, k)) return k;
+  }
+  // נסיון case-insensitive
+  const keys = Object.keys(obj);
+  const lowerMap = new Map(keys.map(k => [k.toLowerCase(), k]));
+  for (const c of candidates) {
+    const real = lowerMap.get(String(c).toLowerCase());
+    if (real) return real;
   }
   return "";
 }
 
-function pickDeltaField(props) {
-  const forced = String(forcedDeltaField.value || "").trim();
-  if (forced && props && Object.prototype.hasOwnProperty.call(props, forced)) return forced;
-
-  const candidates = [
-    "dH_mm","dh_mm","delta_mm","delta",
-    "disp_mm","displacement_mm","cumulative_mm","cum_mm",
-    "deformation_mm","subs_mm"
-  ];
-  for (const k of candidates) {
-    if (props && Object.prototype.hasOwnProperty.call(props, k)) return k;
+/** Grid index for points */
+function cellKey(lat, lon) {
+  const y = Math.floor(lat / GRID_DEG);
+  const x = Math.floor(lon / GRID_DEG);
+  return `${y},${x}`;
+}
+function buildGrid(points) {
+  const m = new Map();
+  for (let i=0; i<points.length; i++) {
+    const p = points[i];
+    const k = cellKey(p.lat, p.lon);
+    if (!m.has(k)) m.set(k, []);
+    m.get(k).push(i);
   }
-  return "";
+  return m;
+}
+function collectCandidatesByBbox(bbox) {
+  if (!grid) return [];
+  const [minLon, minLat, maxLon, maxLat] = bbox;
+
+  const y0 = Math.floor(minLat / GRID_DEG);
+  const y1 = Math.floor(maxLat / GRID_DEG);
+  const x0 = Math.floor(minLon / GRID_DEG);
+  const x1 = Math.floor(maxLon / GRID_DEG);
+
+  const outIdx = [];
+  for (let y=y0; y<=y1; y++) {
+    for (let x=x0; x<=x1; x++) {
+      const k = `${y},${x}`;
+      const arr = grid.get(k);
+      if (arr) outIdx.push(...arr);
+    }
+  }
+  return outIdx;
 }
 
-function computeDeltaMm(rate, props) {
-  const df = pickDeltaField(props);
-  if (df) {
-    const n = toNum(props[df]);
-    return { deltaMm: n, deltaField: df, source: n == null ? "none" : "field" };
-  }
-  if (rate == null) return { deltaMm: null, deltaField: "", source: "none" };
+/** Geometry utils */
+function computeBbox(geom) {
+  let minLon = Infinity, minLat = Infinity, maxLon = -Infinity, maxLat = -Infinity;
 
-  const yrs = Math.max(0.25, toNum(yearsBack.value) ?? 3);
-  return { deltaMm: rate * yrs, deltaField: "", source: "rate*years" };
+  function visitCoord(c) {
+    const lon = c[0], lat = c[1];
+    if (!Number.isFinite(lon) || !Number.isFinite(lat)) return;
+    if (lon < minLon) minLon = lon;
+    if (lat < minLat) minLat = lat;
+    if (lon > maxLon) maxLon = lon;
+    if (lat > maxLat) maxLat = lat;
+  }
+
+  function walk(coords) {
+    if (!coords) return;
+    if (typeof coords[0] === "number") visitCoord(coords);
+    else for (const cc of coords) walk(cc);
+  }
+
+  walk(geom?.coordinates);
+  if (!Number.isFinite(minLon)) return null;
+  return [minLon, minLat, maxLon, maxLat];
 }
 
-function classify(rate, deltaMm) {
-  if (rate == null && deltaMm == null) return "nodata";
-  const byRate = rate != null && rate <= rateThreshold.value;
-  const byDelta = deltaMm != null && deltaMm <= deltaThreshold.value;
-  return (byRate || byDelta) ? "sinking" : "stable";
+function bboxCenter(b) {
+  return { lon: (b[0]+b[2])/2, lat: (b[1]+b[3])/2 };
+}
+
+function expandBboxMeters(b, meters, atLat) {
+  const dLat = meters / 111320;
+  const dLon = meters / (111320 * Math.cos((atLat*Math.PI)/180));
+  return [b[0]-dLon, b[1]-dLat, b[2]+dLon, b[3]+dLat];
+}
+
+/** Point-in-polygon + distance-to-edges (במטרים) */
+function projectToMeters(lat, lon, lat0, lon0) {
+  const k = 111320;
+  const x = (lon - lon0) * Math.cos((lat0*Math.PI)/180) * k;
+  const y = (lat - lat0) * k;
+  return { x, y };
+}
+
+function pointInRing(p, ring) {
+  // ring: [{x,y},...]
+  let inside = false;
+  for (let i=0, j=ring.length-1; i<ring.length; j=i++) {
+    const xi = ring[i].x, yi = ring[i].y;
+    const xj = ring[j].x, yj = ring[j].y;
+    const intersect = ((yi > p.y) !== (yj > p.y)) &&
+      (p.x < (xj - xi) * (p.y - yi) / ((yj - yi) || 1e-12) + xi);
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
+
+function distPointToSeg(p, a, b) {
+  const vx = b.x - a.x, vy = b.y - a.y;
+  const wx = p.x - a.x, wy = p.y - a.y;
+  const c1 = vx*wx + vy*wy;
+  if (c1 <= 0) return Math.hypot(p.x - a.x, p.y - a.y);
+  const c2 = vx*vx + vy*vy;
+  if (c2 <= c1) return Math.hypot(p.x - b.x, p.y - b.y);
+  const t = c1 / (c2 || 1e-12);
+  const px = a.x + t*vx, py = a.y + t*vy;
+  return Math.hypot(p.x - px, p.y - py);
+}
+
+function minDistToRingEdges(p, ring) {
+  let d = Infinity;
+  for (let i=0; i<ring.length; i++) {
+    const a = ring[i];
+    const b = ring[(i+1) % ring.length];
+    d = Math.min(d, distPointToSeg(p, a, b));
+  }
+  return d;
+}
+
+function geomRingsToMeters(geom, lat0, lon0) {
+  // returns array of polygons; polygon = { outer:[{x,y}..], holes:[ring..] }
+  const out = [];
+  if (!geom) return out;
+
+  const type = geom.type;
+  const coords = geom.coordinates;
+
+  function ringToM(ring) {
+    return ring.map(c => projectToMeters(c[1], c[0], lat0, lon0));
+  }
+
+  if (type === "Polygon") {
+    const outer = ringToM(coords[0] || []);
+    const holes = (coords.slice(1) || []).map(ringToM);
+    out.push({ outer, holes });
+  } else if (type === "MultiPolygon") {
+    for (const poly of coords) {
+      const outer = ringToM(poly[0] || []);
+      const holes = (poly.slice(1) || []).map(ringToM);
+      out.push({ outer, holes });
+    }
+  }
+  return out;
+}
+
+function pointInOrNearGeom(lat, lon, geom, bufferM) {
+  const bb = computeBbox(geom);
+  if (!bb) return false;
+  const c = bboxCenter(bb);
+  const p = projectToMeters(lat, lon, c.lat, c.lon);
+  const polys = geomRingsToMeters(geom, c.lat, c.lon);
+
+  for (const poly of polys) {
+    if (!poly.outer.length) continue;
+
+    const inOuter = pointInRing(p, poly.outer);
+    if (inOuter) {
+      // אם בתוך outer, צריך לוודא לא בתוך חור
+      let inHole = false;
+      for (const h of poly.holes) {
+        if (h.length && pointInRing(p, h)) { inHole = true; break; }
+      }
+      if (!inHole) return true;
+    }
+
+    // לא בפנים: מרחק לשפה <= buffer
+    if (bufferM > 0) {
+      const dOuter = minDistToRingEdges(p, poly.outer);
+      if (dOuter <= bufferM) return true;
+    }
+  }
+  return false;
+}
+
+/** InSAR load */
+async function loadInsarPoints() {
+  insar.value = { loaded: false, count: 0, msg: "טוען InSAR…", err: "" };
+  insarPoints = [];
+  grid = null;
+
+  try {
+    const r = await fetch(insarCsvUrl, { cache: "no-store" });
+    if (!r.ok) throw new Error(`insar_points.csv HTTP ${r.status}`);
+    const text = await r.text();
+
+    const { rows } = parseCsv(text);
+    if (!rows.length) {
+      insar.value = { loaded: false, count: 0, msg: "", err: "insar_points.csv ריק" };
+      return;
+    }
+
+    // detect fields based on first row
+    const sample = rows[0];
+    const latF  = pickField(sample, ["Lat","lat","latitude"]);
+    const lonF  = pickField(sample, ["Lon","lon","longitude","Long"]);
+    const velF  = pickField(sample, ["Vel","vel","velocity","V"]);
+    const cohF  = pickField(sample, ["Coer","coer","coh","coherence"]);
+    const topoF = pickField(sample, ["Topo","topo","elev","height"]);
+    const cosUF = pickField(sample, ["cosU","CosU","cosu"]);
+
+    if (!latF || !lonF || !velF) {
+      insar.value = { loaded: false, count: 0, msg: "", err: "לא מצאתי שדות חובה (Lat/Lon/Vel) בקובץ" };
+      return;
+    }
+
+    for (const row of rows) {
+      const lat = toNum(row[latF]);
+      const lon = toNum(row[lonF]);
+      const velCmYr = toNum(row[velF]);
+      if (lat == null || lon == null || velCmYr == null) continue;
+
+      const coher = cohF ? toNum(row[cohF]) : null;
+      const topoM = topoF ? toNum(row[topoF]) : null;
+      const cosU  = cosUF ? toNum(row[cosUF]) : null;
+
+      const velMmYr = velCmYr * 10; // cm/yr -> mm/yr (P-SBAS)
+      insarPoints.push({ lat, lon, vel_cm_yr: velCmYr, vel_mm_yr: velMmYr, coher, topo_m: topoM, cosU });
+    }
+
+    grid = buildGrid(insarPoints);
+    insar.value = { loaded: true, count: insarPoints.length, msg: "OK", err: "" };
+  } catch (e) {
+    insar.value = { loaded: false, count: 0, msg: "", err: String(e) };
+  }
+}
+
+/** Compute per building from InSAR points */
+function computeBuildingInsar(geom) {
+  if (!insar.value.loaded || !insarPoints.length) {
+    return { psCount: 0, rateMmYr: null, coh: null, topoNowM: null, usedMode: "אין InSAR" };
+  }
+
+  const bb0 = computeBbox(geom);
+  if (!bb0) return { psCount: 0, rateMmYr: null, coh: null, topoNowM: null, usedMode: "גאומטריה לא תקינה" };
+
+  const c = bboxCenter(bb0);
+  const bb = expandBboxMeters(bb0, Math.max(0, joinBufferM.value || 0), c.lat);
+
+  const candIdx = collectCandidatesByBbox(bb);
+  const velList = [];
+  const velVertList = [];
+  const cohList = [];
+  const topoList = [];
+
+  const buffer = Math.max(0, joinBufferM.value || 0);
+
+  for (const idx of candIdx) {
+    const p = insarPoints[idx];
+    if (!p) continue;
+
+    // bbox fast
+    if (p.lon < bb[0] || p.lon > bb[2] || p.lat < bb[1] || p.lat > bb[3]) continue;
+
+    // inside or near polygon
+    if (!pointInOrNearGeom(p.lat, p.lon, geom, buffer)) continue;
+
+    velList.push(p.vel_mm_yr);
+
+    // vertical assumption if possible
+    if (assumeVerticalOnly.value && p.cosU != null && Math.abs(p.cosU) > 0.05) {
+      velVertList.push(p.vel_mm_yr / p.cosU);
+    }
+
+    if (p.coher != null) cohList.push(p.coher);
+    if (p.topo_m != null) topoList.push(p.topo_m);
+  }
+
+  const psCount = velList.length;
+  if (!psCount) return { psCount: 0, rateMmYr: null, coh: null, topoNowM: null, usedMode: "אין נקודות לבניין" };
+
+  const vLosMed = median(velList);
+  const vVertMed = velVertList.length ? median(velVertList) : null;
+
+  let rate = (assumeVerticalOnly.value && vVertMed != null) ? vVertMed : vLosMed;
+  let mode = (assumeVerticalOnly.value && vVertMed != null) ? "v אנכי (LOS/cosU, הנחה אנכית בלבד)" : "v LOS (כפי שהוא)";
+
+  // flip sign if user wants
+  if (flipSign.value && rate != null) rate = -rate;
+
+  const coh = cohList.length ? median(cohList) : null;
+  const topoNowM = topoList.length ? median(topoList) : null;
+
+  return { psCount, rateMmYr: rate, coh, topoNowM, usedMode: mode };
+}
+
+function classify(rateMmYr) {
+  if (rateMmYr == null) return "nodata";
+  return rateMmYr <= rateThreshold.value ? "sinking" : "stable";
 }
 
 function statusLabel(status) {
@@ -331,73 +618,43 @@ function statusLabel(status) {
   return "אין נתון";
 }
 
-/** === VISIBILITY FIX: תמיד מגדירים fillColor + fillOpacity ברור === */
-function styleFor(status, rate, deltaMm) {
+function styleFor(status, rateMmYr, deltaMm) {
   if (status === "nodata") {
     return {
-      color: "#64748b",
-      weight: 2,
-      opacity: 0.85,
-      fill: true,
-      fillColor: "#cbd5e1",
-      fillOpacity: 0.22,
-      dashArray: "6 6",
+      color: "#64748b", weight: 2, opacity: 0.85,
+      fill: true, fillColor: "#cbd5e1", fillOpacity: 0.22, dashArray: "6 6",
     };
   }
 
   if (status === "stable") {
     return {
-      color: "#0f172a",
-      weight: 2,
-      opacity: 0.85,
-      fill: true,
-      fillColor: "#60a5fa",
-      fillOpacity: 0.22,
+      color: "#0f172a", weight: 2, opacity: 0.85,
+      fill: true, fillColor: "#60a5fa", fillOpacity: 0.22,
     };
   }
 
-  // sinking: אדום + חומרה
+  // sinking severity
   let s = 0.55;
-  if (colorBy.value === "rate" && rate != null && rateThreshold.value) {
-    const ratio = Math.abs(rate / rateThreshold.value);
+  if (colorBy.value === "rate" && rateMmYr != null && rateThreshold.value) {
+    const ratio = Math.abs(rateMmYr / rateThreshold.value);
     s = Math.max(0.25, Math.min(1, (ratio - 1) / 2));
-  } else if (colorBy.value === "delta" && deltaMm != null && deltaThreshold.value) {
-    const ratio = Math.abs(deltaMm / deltaThreshold.value);
-    s = Math.max(0.25, Math.min(1, (ratio - 1) / 2));
+  } else if (colorBy.value === "delta" && deltaMm != null) {
+    const dt = Math.abs(deltaMm);
+    s = Math.max(0.25, Math.min(1, dt / 20)); // פרוטוטייפ: 20mm ומעלה -> חמור
   }
 
   const fillOpacity = 0.30 + s * 0.45;
   const weight = 2.2 + s * 1.4;
-  const stroke =
-    s >= 0.75 ? "#7f1d1d" :
-    s >= 0.40 ? "#b91c1c" :
-    "#dc2626";
+  const stroke = s >= 0.75 ? "#7f1d1d" : s >= 0.40 ? "#b91c1c" : "#dc2626";
 
   return {
-    color: stroke,
-    weight,
-    opacity: 0.95,
-    fill: true,
-    fillColor: "#ef4444",
-    fillOpacity,
+    color: stroke, weight, opacity: 0.95,
+    fill: true, fillColor: "#ef4444", fillOpacity,
   };
 }
 
 function pickName(props, idx) {
   return props?.name ?? props?.building_id ?? props?.id ?? `בניין ${idx + 1}`;
-}
-function featureKey(props, idx) {
-  return String(props?.building_id ?? props?.id ?? props?.tile_id ?? `f_${idx}`);
-}
-
-/** נקודה מייצגת לגובה: מרכז ה-bounds */
-function representativeLatLng(layer) {
-  try {
-    const b = layer.getBounds();
-    return b.getCenter();
-  } catch {
-    return null;
-  }
 }
 
 /** Hover highlight */
@@ -413,20 +670,16 @@ function applyHover(layer, baseStyle) {
     } catch {}
   });
   layer.on("mouseout", () => {
-    try {
-      layer.setStyle?.(baseStyle);
-    } catch {}
+    try { layer.setStyle?.(baseStyle); } catch {}
   });
 }
 
-/** ===== Map init ===== */
+/** ===== Map ===== */
 function initMap() {
   map = L.map("map", { zoomControl: true, maxZoom: 22, preferCanvas: true }).setView([32.08, 34.78], 12);
 
   const osm = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    maxNativeZoom: 19,
-    maxZoom: 22,
-    attribution: "&copy; OpenStreetMap",
+    maxNativeZoom: 19, maxZoom: 22, attribution: "&copy; OpenStreetMap",
   }).addTo(map);
 
   const esri = L.tileLayer(
@@ -437,19 +690,18 @@ function initMap() {
   sinkingGroup = new L.FeatureGroup().addTo(map);
   stableGroup = new L.FeatureGroup();
   noDataGroup = new L.FeatureGroup();
+  insarPointsGroup = new L.FeatureGroup();
 
-  // שכבות במפה: בסיס + overlay
-  layerControl = L.control
-    .layers(
-      { OSM: osm, "Satellite (Esri)": esri },
-      {
-        "שוקעים/חשודים": sinkingGroup,
-        "יציב/עולה": stableGroup,
-        "אין נתון": noDataGroup,
-      },
-      { position: "topleft", collapsed: true }
-    )
-    .addTo(map);
+  L.control.layers(
+    { OSM: osm, "Satellite (Esri)": esri },
+    {
+      "שוקעים/חשודים": sinkingGroup,
+      "יציב/עולה": stableGroup,
+      "אין נתון": noDataGroup,
+      "נקודות InSAR": insarPointsGroup,
+    },
+    { position: "topleft", collapsed: true }
+  ).addTo(map);
 }
 
 function applyVisibility() {
@@ -468,11 +720,16 @@ function applyVisibility() {
   } else {
     if (map.hasLayer(noDataGroup)) map.removeLayer(noDataGroup);
   }
+
+  // נקודות InSAR נשלטות ע"י showInsarPoints
+  if (showInsarPoints.value) {
+    if (!map.hasLayer(insarPointsGroup)) insarPointsGroup.addTo(map);
+  } else {
+    if (map.hasLayer(insarPointsGroup)) map.removeLayer(insarPointsGroup);
+  }
 }
 
-function clearSelection() {
-  selected.value = null;
-}
+function clearSelection() { selected.value = null; }
 
 function fitToLayer() {
   if (allBounds?.isValid?.()) {
@@ -480,41 +737,89 @@ function fitToLayer() {
   }
 }
 
+function renderInsarPointsLayer() {
+  if (!insarPointsGroup) return;
+  insarPointsGroup.clearLayers();
+
+  if (!insar.value.loaded || !showInsarPoints.value) {
+    applyVisibility();
+    return;
+  }
+
+  // דגימה: לא לצייר מיליונים בפרוטוטייפ
+  const maxDraw = 5000;
+  const step = Math.max(1, Math.floor(insarPoints.length / maxDraw));
+
+  for (let i=0; i<insarPoints.length; i += step) {
+    const p = insarPoints[i];
+    const v = p.vel_mm_yr;
+    const signedV = flipSign.value ? -v : v;
+
+    // צבע פשוט: שקיעה(שלילי) אדום, עליה/הפוך כחול
+    const isSink = signedV <= rateThreshold.value;
+    const fillColor = isSink ? "#ef4444" : "#3b82f6";
+    const opacity = p.coher == null ? 0.45 : Math.max(0.25, Math.min(0.9, p.coher));
+
+    const m = L.circleMarker([p.lat, p.lon], {
+      radius: 3,
+      color: "#111827",
+      weight: 1,
+      fillColor,
+      fillOpacity: opacity,
+      opacity: 0.8,
+    });
+
+    m.bindTooltip(
+      `Vel: ${(v/10).toFixed(2)} cm/yr (${v.toFixed(1)} mm/yr) | Coer: ${p.coher == null ? "—" : p.coher.toFixed(2)} | Topo: ${p.topo_m == null ? "—" : p.topo_m.toFixed(1)} m`,
+      { sticky: true, direction: "top", opacity: 0.95 }
+    );
+
+    m.addTo(insarPointsGroup);
+  }
+
+  applyVisibility();
+}
+
 /** ===== Load + render ===== */
 async function loadAndRender() {
   loadErr.value = "";
-  loadMsg.value = "טוען שכבת בניינים…";
+  loadMsg.value = "טוען בניינים + InSAR…";
   clearSelection();
 
   sinkingGroup?.clearLayers?.();
   stableGroup?.clearLayers?.();
   noDataGroup?.clearLayers?.();
+  insarPointsGroup?.clearLayers?.();
 
   allBounds = null;
   allBoundsValid.value = false;
 
+  // 1) load InSAR (optional but strongly recommended)
+  await loadInsarPoints();
+
+  // 2) load buildings
   try {
-    const r = await fetch(tlvGeoUrl, { cache: "no-store" });
-    if (!r.ok) throw new Error("GeoJSON load failed: " + r.status);
+    const r = await fetch(buildingsUrl, { cache: "no-store" });
+    if (!r.ok) throw new Error("Buildings GeoJSON load failed: " + r.status);
     const gj = await r.json();
 
     const feats = Array.isArray(gj?.features) ? gj.features : [];
     let sinking = 0, stable = 0, noData = 0;
 
-    for (let i = 0; i < feats.length; i++) {
+    for (let i=0; i<feats.length; i++) {
       const f = feats[i];
       const props = f?.properties || {};
+      const geom = f?.geometry;
 
-      const key = featureKey(props, i);
       const name = pickName(props, i);
 
-      const rateField = pickRateField(props);
-      const rate = rateField ? toNum(props[rateField]) : null;
+      const bi = computeBuildingInsar(geom);
+      const rate = bi.rateMmYr;
 
-      const deltaObj = computeDeltaMm(rate, props);
-      const deltaMm = deltaObj.deltaMm;
+      const yrs = Math.max(0.25, toNum(yearsBack.value) ?? 3);
+      const deltaMm = rate == null ? null : (rate * yrs);
 
-      const st = classify(rate, deltaMm);
+      const st = classify(rate);
       if (st === "sinking") sinking++;
       else if (st === "stable") stable++;
       else noData++;
@@ -528,76 +833,38 @@ async function loadAndRender() {
         if (b?.isValid?.()) allBounds = allBounds ? allBounds.extend(b) : b;
       } catch {}
 
-      // hover highlight
       applyHover(layer, baseStyle);
 
-      // tooltip
-      layer.bindTooltip(
-        `v: ${fmt2(rate)} mm/yr | Δh: ${fmt1(deltaMm)} mm | (גובה מהלווין בלחיצה)`,
-        { sticky: true, direction: "top", opacity: 0.95 }
-      );
+      const topoNow = bi.topoNowM;
+      const topoPast = (topoNow == null || deltaMm == null) ? null : (topoNow - (deltaMm/1000));
 
-      // click -> select + fetch height now from satellite
-      layer.on("click", async () => {
-        const latlng = representativeLatLng(layer);
-        const yrs = Math.max(0.25, toNum(yearsBack.value) ?? 3);
+      const tooltip = [
+        `#pts: ${bi.psCount}`,
+        `v: ${fmt2(rate)} mm/yr`,
+        `Δh(${yrs.toFixed(1)}y): ${fmt2(deltaMm)} mm`,
+        `Topo: ${topoNow == null ? "—" : topoNow.toFixed(1)} m`,
+        `Coer: ${bi.coh == null ? "—" : bi.coh.toFixed(2)}`
+      ].join(" | ");
 
+      layer.bindTooltip(tooltip, { sticky: true, direction: "top", opacity: 0.95 });
+
+      layer.on("click", () => {
         selected.value = {
-          key,
           name,
           status: st,
           statusLabel: statusLabel(st),
-          rate,
+          psCountLabel: String(bi.psCount),
           rateLabel: fmt2(rate),
-          rateField: rateField || "",
-          deltaMm,
-          deltaLabel: fmt1(deltaMm),
-          deltaField: deltaObj.deltaField || "",
-          deltaSourceLabel:
-            deltaObj.source === "field" ? "שדה בקובץ" :
-            deltaObj.source === "rate*years" ? "חישוב v×שנים" :
-            "",
-          heightNowM: null,
-          heightPastM: null,
-          heightDiffM: null,
-          heightNowLabel: latlng ? "טוען…" : "—",
-          heightPastLabel: "—",
-          heightDiffLabel: "—",
-          heightErr: "",
-          heightInfo: latlng
-            ? `נקודת דגימה לגובה (מרכז הפוליגון): ${latlng.lat.toFixed(5)}, ${latlng.lng.toFixed(5)}`
-            : "לא הצלחתי לחשב נקודת דגימה לגובה.",
+          rateMode: bi.usedMode,
+          cohLabel: bi.coh == null ? "—" : bi.coh.toFixed(2),
+          topoNowLabel: topoNow == null ? "—" : topoNow.toFixed(2),
+          topoPastLabel: topoPast == null ? "—" : topoPast.toFixed(2),
+          deltaLabel: deltaMm == null ? "—" : deltaMm.toFixed(1),
+          note:
+            !insar.value.loaded ? "אין קובץ InSAR נטען. הוסף data/insar_points.csv כדי לקבל נתונים." :
+            bi.psCount === 0 ? "אין נקודות InSAR ששויכו לבניין (נסה להגדיל Buffer או לבדוק כיסוי נקודות)." :
+            `מבוסס מדיאן של ${bi.psCount} נק׳. אם Coer נמוך או מעט נקודות—קח בזהירות.`,
         };
-
-        if (!latlng) return;
-
-        try {
-          const hNow = await getHeightNowFromSatellite(key, latlng);
-          if (hNow == null) return;
-
-          const hPast = (hNow == null || deltaMm == null) ? null : (hNow - (deltaMm / 1000));
-          const hDiff = (hNow == null || hPast == null) ? null : (hNow - hPast);
-
-          if (selected.value?.key === key) {
-            selected.value.heightNowM = hNow;
-            selected.value.heightPastM = hPast;
-            selected.value.heightDiffM = hDiff;
-
-            selected.value.heightNowLabel = fmt2(hNow);
-            selected.value.heightPastLabel = fmt2(hPast);
-            selected.value.heightDiffLabel = hDiff == null ? "—" : hDiff.toFixed(4);
-
-            selected.value.heightInfo =
-              `גובה (DEM) מחושב דרך Elevation API. גובה בעבר = גובה עכשיו - (Δh/1000). חלון זמן: ${yrs.toFixed(2)} שנים.`;
-          }
-        } catch (e) {
-          if (selected.value?.key === key) {
-            selected.value.heightErr = String(e);
-            selected.value.heightNowLabel = "—";
-            selected.value.heightPastLabel = "—";
-            selected.value.heightDiffLabel = "—";
-          }
-        }
       });
 
       if (st === "sinking") layer.addTo(sinkingGroup);
@@ -606,14 +873,18 @@ async function loadAndRender() {
     }
 
     stats.value = { total: feats.length, sinking, stable, noData };
-    applyVisibility();
 
     allBoundsValid.value = !!allBounds?.isValid?.();
     if (allBoundsValid.value) {
       try { map.fitBounds(allBounds.pad(0.08)); } catch {}
     }
 
-    loadMsg.value = `נטענו ${feats.length} בניינים.`;
+    // points layer if requested
+    renderInsarPointsLayer();
+
+    applyVisibility();
+
+    loadMsg.value = `נטענו ${feats.length} בניינים. InSAR: ${insar.value.loaded ? `${insar.value.count} נק׳` : "לא נטען"}`;
   } catch (e) {
     loadMsg.value = "";
     loadErr.value = String(e);
@@ -625,7 +896,7 @@ function reload() {
   loadAndRender();
 }
 
-watch([rateThreshold, deltaThreshold, yearsBack, forcedRateField, forcedDeltaField, colorBy], () => {
+watch([rateThreshold, yearsBack, joinBufferM, flipSign, assumeVerticalOnly, colorBy], () => {
   if (!map) return;
   loadAndRender();
 });
@@ -689,12 +960,7 @@ select { cursor:pointer; }
 .hint { font-size:11px; opacity:0.7; margin-top:6px; }
 .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 
-.sumTitle {
-  cursor: pointer;
-  font-weight: 900;
-  list-style: none;
-  user-select: none;
-}
+.sumTitle { cursor:pointer; font-weight:900; list-style:none; user-select:none; }
 details > summary::-webkit-details-marker { display:none; }
 
 .gloss { margin-top:10px; display:grid; gap:10px; }
