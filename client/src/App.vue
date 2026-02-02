@@ -4,7 +4,7 @@
       <div class="top">
         <div>
           <div class="title">SatMap</div>
-          <div class="sub">Prototype – בניינים + InSAR (P-SBAS CSV) + Δגובה</div>
+          <div class="sub">Prototype – בניינים + InSAR (P-SBAS CSV) + Δגובה + VERTEX Imagery</div>
         </div>
         <div class="topBtns">
           <button class="btn ghost" @click="fitToLayer" :disabled="!allBoundsValid">התמקד בשכבה</button>
@@ -12,12 +12,42 @@
         </div>
       </div>
 
+      <!-- ===== Basemap / Vertex ===== -->
+      <div class="box">
+        <div class="row2">
+          <div>
+            <label>רקע מפה</label>
+            <select v-model="basemap" @change="applyBasemap">
+              <option value="osm">OSM</option>
+              <option value="esri">Satellite (Esri)</option>
+              <option value="vertexTiles">VERTEX Tiles (XYZ)</option>
+            </select>
+            <div class="hint">
+              Tiles: <span class="mono">public/data/vertex_tiles/{z}/{x}/{y}.jpg</span>
+            </div>
+          </div>
+
+          <div>
+            <label class="chk">
+              <input type="checkbox" v-model="showVertexOverlay" @change="toggleVertexOverlay" :disabled="!vertexOverlay.ready" />
+              להציג VERTEX Overlay (קובץ תמונה יחיד)
+            </label>
+            <div class="hint">
+              Overlay: <span class="mono">public/data/vertex_overlay.png</span><br />
+              Bounds: <span class="mono">public/data/vertex_overlay_bounds.json</span>
+              <span v-if="vertexOverlay.msg" class="muted"> — {{ vertexOverlay.msg }}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== Controls ===== -->
       <div class="box">
         <div class="row2">
           <div>
             <label>סף “שוקע/חשוד” v (mm/yr)</label>
             <input type="number" v-model.number="rateThreshold" step="0.5" />
-            <div class="hint">טיפ: התחל ב־-2 (מבוסס ספרות), ואז כוון לפי הנתונים שלך</div>
+            <div class="hint">טיפ: התחל ב־-2 ואז כוון לפי הנתונים שלך</div>
           </div>
           <div>
             <label>X שנים אחורה להשוואה</label>
@@ -30,7 +60,7 @@
           <div>
             <label>Buffer שיוך נקודות לבניין (מטר)</label>
             <input type="number" v-model.number="joinBufferM" step="0.5" min="0" />
-            <div class="hint">ברירת מחדל 2m (נפוץ במחקרים בגלל דיוק מיקום נקודות InSAR)</div>
+            <div class="hint">ברירת מחדל 2m</div>
           </div>
           <div>
             <label>צבע “שוקעים” לפי</label>
@@ -49,7 +79,7 @@
           </label>
           <label class="chk">
             <input type="checkbox" v-model="assumeVerticalOnly" />
-            הנחת תנועה אנכית בלבד (שימוש ב־cosU אם קיים)
+            הנחת תנועה אנכית בלבד (LOS/cosU אם קיים)
           </label>
         </div>
 
@@ -72,6 +102,7 @@
           <div class="hint" style="margin-top:10px">
             InSAR: <b>{{ insar.loaded ? `${insar.count} נקודות נטענו` : "לא נטען" }}</b>
             <span v-if="insar.msg" class="muted"> — {{ insar.msg }}</span>
+            <span v-if="insar.err" class="err"> — {{ insar.err }}</span>
           </div>
         </div>
 
@@ -88,11 +119,83 @@
         <div class="legend">
           <div class="legRow"><span class="sw sw-sink"></span> שוקע/חשוד (v ≤ {{ rateThreshold }})</div>
           <div class="legRow"><span class="sw sw-stable"></span> יציב/עולה</div>
-          <div class="legRow"><span class="sw sw-nodata"></span> אין נתון (אין נקודות InSAR לבניין)</div>
+          <div class="legRow"><span class="sw sw-nodata"></span> אין נתון</div>
         </div>
       </div>
 
+      <!-- ===== Analysis ===== -->
       <details class="box" open>
+        <summary class="sumTitle">אנליזה – למצוא מהר בניינים “חשודים” + יצוא נתונים</summary>
+
+        <div class="row2">
+          <div>
+            <label>מינימום נקודות (#pts)</label>
+            <input type="number" v-model.number="minPoints" step="1" min="0" />
+            <div class="hint">מסנן איכות: פחות נקודות = פחות יציב</div>
+          </div>
+          <div>
+            <label>מינימום Coherence</label>
+            <input type="number" v-model.number="minCoh" step="0.05" min="0" max="1" />
+            <div class="hint">למשל 0.35–0.55</div>
+          </div>
+        </div>
+
+        <div class="row2">
+          <div>
+            <label>מיון רשימה לפי</label>
+            <select v-model="sortBy">
+              <option value="rate">v (הכי שלילי)</option>
+              <option value="delta">Δh (הכי גדול)</option>
+              <option value="coh">Coherence (הכי גבוה)</option>
+              <option value="pts">#pts (הכי הרבה)</option>
+            </select>
+          </div>
+          <div>
+            <label>חיפוש (שם/ID)</label>
+            <input type="text" v-model="q" placeholder="לדוגמה: 10231 / BenYehuda" />
+          </div>
+        </div>
+
+        <div class="row2">
+          <button class="btn ghost" @click="exportCsv" :disabled="!buildingRows.length">הורד CSV (בניינים+חישובים)</button>
+          <button class="btn ghost" @click="exportGeojson" :disabled="!buildingRows.length">הורד GeoJSON (עם properties מחושבים)</button>
+        </div>
+
+        <div class="mini muted" style="margin-top:10px">
+          מציג רק “שוקעים/חשודים” שעוברים את מסנני האיכות.
+        </div>
+
+        <div class="list">
+          <button
+            v-for="b in analysisList"
+            :key="b.key"
+            class="listItem"
+            @click="zoomToRow(b)"
+            :title="'לחץ לזום + בחירה'"
+          >
+            <div class="liTop">
+              <div class="liName">{{ b.name }}</div>
+              <div class="badge" :class="b.badgeClass">{{ b.badge }}</div>
+            </div>
+            <div class="liMeta">
+              <span class="mono">v {{ b.rateLabel }}</span>
+              <span class="dot">•</span>
+              <span class="mono">Δh {{ b.deltaLabel }}</span>
+              <span class="dot">•</span>
+              <span class="mono">pts {{ b.psCount }}</span>
+              <span class="dot">•</span>
+              <span class="mono">coh {{ b.cohLabel }}</span>
+            </div>
+          </button>
+
+          <div v-if="!analysisList.length" class="mini muted" style="margin-top:10px">
+            אין תוצאות כרגע (נסה להקטין מינימום נקודות/Coherence או לשנות סף v).
+          </div>
+        </div>
+      </details>
+
+      <!-- ===== How it works (your original) ===== -->
+      <details class="box">
         <summary class="sumTitle">מקרא נתונים – איך האתר משיג ומחשב כל דבר</summary>
 
         <div class="gloss">
@@ -111,7 +214,7 @@
               מהירות תזוזה שנתית:
               <ul>
                 <li>מה-CSV: <span class="mono">Vel</span> הוא <b>cm/year</b> → ממירים ל-mm/year: <span class="mono">v = Vel×10</span></li>
-                <li>הערכים הם LOS. אם מסומן “אנכי בלבד”, מחלקים ב-<span class="mono">cosU</span> (אם קיים) בהנחה שהתנועה רק אנכית.</li>
+                <li>LOS. אם “אנכי בלבד” מסומן, מחלקים ב-<span class="mono">cosU</span> (אם קיים).</li>
                 <li>לכל בניין לוקחים <b>מדיאן</b> של v מכל הנקודות בתוך/עד Buffer סביב הפוליגון.</li>
               </ul>
             </div>
@@ -122,7 +225,7 @@
             <div class="glVal">
               שינוי מצטבר:
               <div class="mono">Δh = v × X</div>
-              <div class="hint">אם v שלילי → שקיעה (גובה קטן עם הזמן).</div>
+              <div class="hint">אם v שלילי → שקיעה.</div>
             </div>
           </div>
 
@@ -131,14 +234,12 @@
             <div class="glVal">
               מה-CSV: <span class="mono">Topo</span> = גובה במטרים (מעל אליפסואיד).<br/>
               לבניין לוקחים <b>מדיאן</b> של Topo של הנקודות ששויכו אליו.
-              <div class="hint">זה לא “גובה בניין”, אלא גובה הנקודות/הקרקע/היעד כפי שמוגדר בתוצר.</div>
             </div>
           </div>
 
           <div class="glRow">
             <div class="glKey">גובה לפני X שנים (m)</div>
             <div class="glVal">
-              נגזר מהגובה ומהשינוי:
               <div class="mono">TopoPast = TopoNow - (Δh / 1000)</div>
             </div>
           </div>
@@ -146,16 +247,16 @@
           <div class="glRow">
             <div class="glKey">איכות/אמינות</div>
             <div class="glVal">
-              מציגים:
               <ul>
-                <li><b>#points</b> = כמה נקודות InSAR שויכו לבניין</li>
-                <li><b>Coer</b> = Temporal Coherence (מדיאן) — גבוה יותר בדרך כלל אמין יותר</li>
+                <li><b>#points</b> = כמה נקודות שויכו לבניין</li>
+                <li><b>Coer</b> = Temporal Coherence (מדיאן) — גבוה יותר לרוב אמין יותר</li>
               </ul>
             </div>
           </div>
         </div>
       </details>
 
+      <!-- ===== Selected ===== -->
       <div class="box" v-if="selected">
         <div class="selHeader">
           <div class="mini"><b>{{ selected.name }}</b></div>
@@ -217,16 +318,26 @@
 </template>
 
 <script setup>
-import { onMounted, ref, watch } from "vue";
+import { onMounted, ref, watch, computed } from "vue";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 
-const buildingsUrl = `${import.meta.env.BASE_URL}data/tlvex.geojson`;
-const insarCsvUrl  = `${import.meta.env.BASE_URL}data/insar_points.csv`;
+const BASE = import.meta.env.BASE_URL;
+
+const buildingsUrl = `${BASE}data/tlvex.geojson`;
+const insarCsvUrl  = `${BASE}data/insar_points.csv`;
+
+// Vertex imagery (no installs)
+const vertexTilesUrl = (import.meta.env.VITE_VERTEX_TILES_URL || `${BASE}data/vertex_tiles/{z}/{x}/{y}.jpg`);
+const vertexOverlayUrl = (import.meta.env.VITE_VERTEX_OVERLAY_URL || `${BASE}data/vertex_overlay.png`);
+const vertexOverlayBoundsUrl = (import.meta.env.VITE_VERTEX_OVERLAY_BOUNDS_URL || `${BASE}data/vertex_overlay_bounds.json`);
 
 /** UI */
+const basemap = ref("esri");
+const showVertexOverlay = ref(false);
+
 const yearsBack = ref(3);
-const rateThreshold = ref(-2); // mm/yr (שלילי = שקיעה)
+const rateThreshold = ref(-2);
 const colorBy = ref("status");
 
 const joinBufferM = ref(2);
@@ -237,6 +348,11 @@ const showStable = ref(true);
 const showNoData = ref(false);
 const showInsarPoints = ref(false);
 
+const minPoints = ref(3);
+const minCoh = ref(0.35);
+const sortBy = ref("rate");
+const q = ref("");
+
 const loadMsg = ref("");
 const loadErr = ref("");
 
@@ -245,8 +361,16 @@ const selected = ref(null);
 
 const insar = ref({ loaded: false, count: 0, msg: "", err: "" });
 
+const vertexOverlay = ref({ ready: false, msg: "" });
+
 /** Leaflet */
 let map = null;
+
+let osmLayer = null;
+let esriLayer = null;
+let vertexTilesLayer = null;
+let vertexImageOverlay = null;
+
 let sinkingGroup = null;
 let stableGroup = null;
 let noDataGroup = null;
@@ -255,35 +379,33 @@ let insarPointsGroup = null;
 let allBounds = null;
 const allBoundsValid = ref(false);
 
+/** In-memory rows for analysis/export */
+const buildingRows = ref([]); // [{key,name,status,psCount,rate,deltaMm,coh,topoNow,topoPast,bounds,selPayload,conf}]
+
 /** InSAR in-memory */
-let insarPoints = []; // {lat, lon, vel_cm_yr, vel_mm_yr, coher, topo_m, cosU}
+let insarPoints = [];
 let grid = null;
-const GRID_DEG = 0.002; // ~200m (lat)
+const GRID_DEG = 0.002;
 
 /** ===== Helpers ===== */
 function toNum(v) {
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
 }
-function fmt2(n) { return n == null ? "—" : Number(n).toFixed(2); }
-function fmt3(n) { return n == null ? "—" : Number(n).toFixed(3); }
-function fmtInt(n) { return n == null ? "—" : String(Math.round(n)); }
-
 function median(arr) {
   const a = arr.filter(x => Number.isFinite(x)).slice().sort((x,y)=>x-y);
   if (!a.length) return null;
   const m = Math.floor(a.length/2);
   return a.length % 2 ? a[m] : (a[m-1] + a[m]) / 2;
 }
+function fmt2(n) { return n == null ? "—" : Number(n).toFixed(2); }
 
-/** CSV parsing (פשוט + מספיק לתוצרים סטנדרטיים) */
+/** CSV parsing */
 function parseCsv(text) {
   const lines = text.split(/\r?\n/).filter(l => l.trim().length);
   if (!lines.length) return { headers: [], rows: [] };
-
   const headers = splitCsvLine(lines[0]).map(s => s.trim());
   const rows = [];
-
   for (let i=1; i<lines.length; i++) {
     const cols = splitCsvLine(lines[i]);
     if (!cols.length) continue;
@@ -293,12 +415,10 @@ function parseCsv(text) {
   }
   return { headers, rows };
 }
-
 function splitCsvLine(line) {
   const out = [];
   let cur = "";
   let inQ = false;
-
   for (let i=0; i<line.length; i++) {
     const ch = line[i];
     if (ch === '"') {
@@ -312,13 +432,11 @@ function splitCsvLine(line) {
   out.push(cur);
   return out;
 }
-
 function pickField(obj, candidates) {
   if (!obj) return "";
   for (const k of candidates) {
     if (Object.prototype.hasOwnProperty.call(obj, k)) return k;
   }
-  // נסיון case-insensitive
   const keys = Object.keys(obj);
   const lowerMap = new Map(keys.map(k => [k.toLowerCase(), k]));
   for (const c of candidates) {
@@ -328,7 +446,7 @@ function pickField(obj, candidates) {
   return "";
 }
 
-/** Grid index for points */
+/** Grid index */
 function cellKey(lat, lon) {
   const y = Math.floor(lat / GRID_DEG);
   const x = Math.floor(lon / GRID_DEG);
@@ -347,12 +465,10 @@ function buildGrid(points) {
 function collectCandidatesByBbox(bbox) {
   if (!grid) return [];
   const [minLon, minLat, maxLon, maxLat] = bbox;
-
   const y0 = Math.floor(minLat / GRID_DEG);
   const y1 = Math.floor(maxLat / GRID_DEG);
   const x0 = Math.floor(minLon / GRID_DEG);
   const x1 = Math.floor(maxLon / GRID_DEG);
-
   const outIdx = [];
   for (let y=y0; y<=y1; y++) {
     for (let x=x0; x<=x1; x++) {
@@ -367,7 +483,6 @@ function collectCandidatesByBbox(bbox) {
 /** Geometry utils */
 function computeBbox(geom) {
   let minLon = Infinity, minLat = Infinity, maxLon = -Infinity, maxLat = -Infinity;
-
   function visitCoord(c) {
     const lon = c[0], lat = c[1];
     if (!Number.isFinite(lon) || !Number.isFinite(lat)) return;
@@ -376,38 +491,28 @@ function computeBbox(geom) {
     if (lon > maxLon) maxLon = lon;
     if (lat > maxLat) maxLat = lat;
   }
-
   function walk(coords) {
     if (!coords) return;
     if (typeof coords[0] === "number") visitCoord(coords);
     else for (const cc of coords) walk(cc);
   }
-
   walk(geom?.coordinates);
   if (!Number.isFinite(minLon)) return null;
   return [minLon, minLat, maxLon, maxLat];
 }
-
-function bboxCenter(b) {
-  return { lon: (b[0]+b[2])/2, lat: (b[1]+b[3])/2 };
-}
-
+function bboxCenter(b) { return { lon: (b[0]+b[2])/2, lat: (b[1]+b[3])/2 }; }
 function expandBboxMeters(b, meters, atLat) {
   const dLat = meters / 111320;
   const dLon = meters / (111320 * Math.cos((atLat*Math.PI)/180));
   return [b[0]-dLon, b[1]-dLat, b[2]+dLon, b[3]+dLat];
 }
-
-/** Point-in-polygon + distance-to-edges (במטרים) */
 function projectToMeters(lat, lon, lat0, lon0) {
   const k = 111320;
   const x = (lon - lon0) * Math.cos((lat0*Math.PI)/180) * k;
   const y = (lat - lat0) * k;
   return { x, y };
 }
-
 function pointInRing(p, ring) {
-  // ring: [{x,y},...]
   let inside = false;
   for (let i=0, j=ring.length-1; i<ring.length; j=i++) {
     const xi = ring[i].x, yi = ring[i].y;
@@ -418,7 +523,6 @@ function pointInRing(p, ring) {
   }
   return inside;
 }
-
 function distPointToSeg(p, a, b) {
   const vx = b.x - a.x, vy = b.y - a.y;
   const wx = p.x - a.x, wy = p.y - a.y;
@@ -430,7 +534,6 @@ function distPointToSeg(p, a, b) {
   const px = a.x + t*vx, py = a.y + t*vy;
   return Math.hypot(p.x - px, p.y - py);
 }
-
 function minDistToRingEdges(p, ring) {
   let d = Infinity;
   for (let i=0; i<ring.length; i++) {
@@ -440,19 +543,12 @@ function minDistToRingEdges(p, ring) {
   }
   return d;
 }
-
 function geomRingsToMeters(geom, lat0, lon0) {
-  // returns array of polygons; polygon = { outer:[{x,y}..], holes:[ring..] }
   const out = [];
   if (!geom) return out;
-
   const type = geom.type;
   const coords = geom.coordinates;
-
-  function ringToM(ring) {
-    return ring.map(c => projectToMeters(c[1], c[0], lat0, lon0));
-  }
-
+  function ringToM(ring) { return ring.map(c => projectToMeters(c[1], c[0], lat0, lon0)); }
   if (type === "Polygon") {
     const outer = ringToM(coords[0] || []);
     const holes = (coords.slice(1) || []).map(ringToM);
@@ -466,7 +562,6 @@ function geomRingsToMeters(geom, lat0, lon0) {
   }
   return out;
 }
-
 function pointInOrNearGeom(lat, lon, geom, bufferM) {
   const bb = computeBbox(geom);
   if (!bb) return false;
@@ -476,18 +571,14 @@ function pointInOrNearGeom(lat, lon, geom, bufferM) {
 
   for (const poly of polys) {
     if (!poly.outer.length) continue;
-
     const inOuter = pointInRing(p, poly.outer);
     if (inOuter) {
-      // אם בתוך outer, צריך לוודא לא בתוך חור
       let inHole = false;
       for (const h of poly.holes) {
         if (h.length && pointInRing(p, h)) { inHole = true; break; }
       }
       if (!inHole) return true;
     }
-
-    // לא בפנים: מרחק לשפה <= buffer
     if (bufferM > 0) {
       const dOuter = minDistToRingEdges(p, poly.outer);
       if (dOuter <= bufferM) return true;
@@ -513,7 +604,6 @@ async function loadInsarPoints() {
       return;
     }
 
-    // detect fields based on first row
     const sample = rows[0];
     const latF  = pickField(sample, ["Lat","lat","latitude"]);
     const lonF  = pickField(sample, ["Lon","lon","longitude","Long"]);
@@ -523,7 +613,7 @@ async function loadInsarPoints() {
     const cosUF = pickField(sample, ["cosU","CosU","cosu"]);
 
     if (!latF || !lonF || !velF) {
-      insar.value = { loaded: false, count: 0, msg: "", err: "לא מצאתי שדות חובה (Lat/Lon/Vel) בקובץ" };
+      insar.value = { loaded: false, count: 0, msg: "", err: "לא מצאתי שדות חובה (Lat/Lon/Vel)" };
       return;
     }
 
@@ -537,8 +627,8 @@ async function loadInsarPoints() {
       const topoM = topoF ? toNum(row[topoF]) : null;
       const cosU  = cosUF ? toNum(row[cosUF]) : null;
 
-      const velMmYr = velCmYr * 10; // cm/yr -> mm/yr (P-SBAS)
-      insarPoints.push({ lat, lon, vel_cm_yr: velCmYr, vel_mm_yr: velMmYr, coher, topo_m: topoM, cosU });
+      const velMmYr = velCmYr * 10;
+      insarPoints.push({ lat, lon, vel_mm_yr: velMmYr, coher, topo_m: topoM, cosU });
     }
 
     grid = buildGrid(insarPoints);
@@ -548,7 +638,7 @@ async function loadInsarPoints() {
   }
 }
 
-/** Compute per building from InSAR points */
+/** Compute per building */
 function computeBuildingInsar(geom) {
   if (!insar.value.loaded || !insarPoints.length) {
     return { psCount: 0, rateMmYr: null, coh: null, topoNowM: null, usedMode: "אין InSAR" };
@@ -572,15 +662,11 @@ function computeBuildingInsar(geom) {
     const p = insarPoints[idx];
     if (!p) continue;
 
-    // bbox fast
     if (p.lon < bb[0] || p.lon > bb[2] || p.lat < bb[1] || p.lat > bb[3]) continue;
-
-    // inside or near polygon
     if (!pointInOrNearGeom(p.lat, p.lon, geom, buffer)) continue;
 
     velList.push(p.vel_mm_yr);
 
-    // vertical assumption if possible
     if (assumeVerticalOnly.value && p.cosU != null && Math.abs(p.cosU) > 0.05) {
       velVertList.push(p.vel_mm_yr / p.cosU);
     }
@@ -596,9 +682,8 @@ function computeBuildingInsar(geom) {
   const vVertMed = velVertList.length ? median(velVertList) : null;
 
   let rate = (assumeVerticalOnly.value && vVertMed != null) ? vVertMed : vLosMed;
-  let mode = (assumeVerticalOnly.value && vVertMed != null) ? "v אנכי (LOS/cosU, הנחה אנכית בלבד)" : "v LOS (כפי שהוא)";
+  let mode = (assumeVerticalOnly.value && vVertMed != null) ? "v אנכי (LOS/cosU)" : "v LOS";
 
-  // flip sign if user wants
   if (flipSign.value && rate != null) rate = -rate;
 
   const coh = cohList.length ? median(cohList) : null;
@@ -611,66 +696,59 @@ function classify(rateMmYr) {
   if (rateMmYr == null) return "nodata";
   return rateMmYr <= rateThreshold.value ? "sinking" : "stable";
 }
-
 function statusLabel(status) {
   if (status === "sinking") return "שוקע/חשוד";
   if (status === "stable") return "יציב/עולה";
   return "אין נתון";
 }
+function confidenceBadge(psCount, coh) {
+  if ((psCount ?? 0) >= 10 && (coh ?? 0) >= 0.6) return { badge:"HIGH", cls:"bHigh" };
+  if ((psCount ?? 0) >= 5 && (coh ?? 0) >= 0.4) return { badge:"MED", cls:"bMed" };
+  return { badge:"LOW", cls:"bLow" };
+}
 
 function styleFor(status, rateMmYr, deltaMm) {
   if (status === "nodata") {
-    return {
-      color: "#64748b", weight: 2, opacity: 0.85,
-      fill: true, fillColor: "#cbd5e1", fillOpacity: 0.22, dashArray: "6 6",
-    };
+    return { color: "#64748b", weight: 2, opacity: 0.85, fill: true, fillColor: "#cbd5e1", fillOpacity: 0.22, dashArray: "6 6" };
   }
-
   if (status === "stable") {
-    return {
-      color: "#0f172a", weight: 2, opacity: 0.85,
-      fill: true, fillColor: "#60a5fa", fillOpacity: 0.22,
-    };
+    return { color: "#0f172a", weight: 2, opacity: 0.85, fill: true, fillColor: "#60a5fa", fillOpacity: 0.22 };
   }
 
-  // sinking severity
   let s = 0.55;
   if (colorBy.value === "rate" && rateMmYr != null && rateThreshold.value) {
     const ratio = Math.abs(rateMmYr / rateThreshold.value);
     s = Math.max(0.25, Math.min(1, (ratio - 1) / 2));
   } else if (colorBy.value === "delta" && deltaMm != null) {
     const dt = Math.abs(deltaMm);
-    s = Math.max(0.25, Math.min(1, dt / 20)); // פרוטוטייפ: 20mm ומעלה -> חמור
+    s = Math.max(0.25, Math.min(1, dt / 20));
   }
 
   const fillOpacity = 0.30 + s * 0.45;
   const weight = 2.2 + s * 1.4;
   const stroke = s >= 0.75 ? "#7f1d1d" : s >= 0.40 ? "#b91c1c" : "#dc2626";
 
-  return {
-    color: stroke, weight, opacity: 0.95,
-    fill: true, fillColor: "#ef4444", fillOpacity,
-  };
+  return { color: stroke, weight, opacity: 0.95, fill: true, fillColor: "#ef4444", fillOpacity };
 }
 
 function pickName(props, idx) {
   return props?.name ?? props?.building_id ?? props?.id ?? `בניין ${idx + 1}`;
 }
 
-/** Hover highlight */
-function applyHover(layer, baseStyle) {
-  layer.on("mouseover", () => {
+/** Hover highlight for path layer */
+function applyHover(pathLayer, baseStyle) {
+  pathLayer.on("mouseover", () => {
     try {
-      layer.setStyle?.({
+      pathLayer.setStyle?.({
         weight: Math.max(3, (baseStyle?.weight ?? 2) + 1),
         opacity: 1,
         fillOpacity: Math.min(0.85, (baseStyle?.fillOpacity ?? 0.25) + 0.15),
       });
-      layer.bringToFront?.();
+      pathLayer.bringToFront?.();
     } catch {}
   });
-  layer.on("mouseout", () => {
-    try { layer.setStyle?.(baseStyle); } catch {}
+  pathLayer.on("mouseout", () => {
+    try { pathLayer.setStyle?.(baseStyle); } catch {}
   });
 }
 
@@ -678,30 +756,75 @@ function applyHover(layer, baseStyle) {
 function initMap() {
   map = L.map("map", { zoomControl: true, maxZoom: 22, preferCanvas: true }).setView([32.08, 34.78], 12);
 
-  const osm = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    maxNativeZoom: 19, maxZoom: 22, attribution: "&copy; OpenStreetMap",
-  }).addTo(map);
+  // Pane so overlay image stays BELOW polygons
+  map.createPane("rasterPane");
+  map.getPane("rasterPane").style.zIndex = 250;
 
-  const esri = L.tileLayer(
+  osmLayer = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxNativeZoom: 19, maxZoom: 22, attribution: "&copy; OpenStreetMap",
+  });
+
+  esriLayer = L.tileLayer(
     "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
     { maxZoom: 22, attribution: "&copy; Esri" }
   );
 
-  sinkingGroup = new L.FeatureGroup().addTo(map);
-  stableGroup = new L.FeatureGroup();
-  noDataGroup = new L.FeatureGroup();
-  insarPointsGroup = new L.FeatureGroup();
+  vertexTilesLayer = L.tileLayer(vertexTilesUrl, { maxZoom: 22, maxNativeZoom: 22, attribution: "VERTEX tiles" });
 
-  L.control.layers(
-    { OSM: osm, "Satellite (Esri)": esri },
-    {
-      "שוקעים/חשודים": sinkingGroup,
-      "יציב/עולה": stableGroup,
-      "אין נתון": noDataGroup,
-      "נקודות InSAR": insarPointsGroup,
-    },
-    { position: "topleft", collapsed: true }
-  ).addTo(map);
+  // Default base
+  applyBasemap();
+
+  sinkingGroup = new L.FeatureGroup().addTo(map);
+  stableGroup = new L.FeatureGroup().addTo(map);
+  noDataGroup = new L.FeatureGroup().addTo(map);
+  insarPointsGroup = new L.FeatureGroup().addTo(map);
+
+  // Try load overlay bounds (optional)
+  loadVertexOverlayBounds();
+}
+
+function applyBasemap() {
+  if (!map) return;
+  // remove all base layers
+  [osmLayer, esriLayer, vertexTilesLayer].forEach(l => { if (l && map.hasLayer(l)) map.removeLayer(l); });
+
+  const pick =
+    basemap.value === "osm" ? osmLayer :
+    basemap.value === "vertexTiles" ? vertexTilesLayer :
+    esriLayer;
+
+  pick?.addTo(map);
+}
+
+async function loadVertexOverlayBounds() {
+  vertexOverlay.value = { ready: false, msg: "בודק overlay…" };
+  try {
+    const r = await fetch(vertexOverlayBoundsUrl, { cache: "no-store" });
+    if (!r.ok) throw new Error(`bounds HTTP ${r.status}`);
+    const j = await r.json();
+
+    let sw = null, ne = null;
+    if (Array.isArray(j) && j.length === 2 && Array.isArray(j[0]) && Array.isArray(j[1])) {
+      sw = j[0]; ne = j[1];
+    } else if (j?.southWest && j?.northEast) {
+      sw = j.southWest; ne = j.northEast;
+    }
+
+    if (!sw || !ne || sw.length < 2 || ne.length < 2) throw new Error("bounds format not recognized");
+
+    const bounds = L.latLngBounds(L.latLng(sw[0], sw[1]), L.latLng(ne[0], ne[1]));
+    vertexImageOverlay = L.imageOverlay(vertexOverlayUrl, bounds, { opacity: 0.75, pane: "rasterPane" });
+
+    vertexOverlay.value = { ready: true, msg: "מוכן" };
+  } catch (e) {
+    vertexOverlay.value = { ready: false, msg: "לא נמצא/לא תקין (אפשר להתעלם אם משתמשים ב-Tiles)" };
+  }
+}
+
+function toggleVertexOverlay() {
+  if (!map || !vertexImageOverlay) return;
+  if (showVertexOverlay.value) vertexImageOverlay.addTo(map);
+  else if (map.hasLayer(vertexImageOverlay)) map.removeLayer(vertexImageOverlay);
 }
 
 function applyVisibility() {
@@ -721,7 +844,6 @@ function applyVisibility() {
     if (map.hasLayer(noDataGroup)) map.removeLayer(noDataGroup);
   }
 
-  // נקודות InSAR נשלטות ע"י showInsarPoints
   if (showInsarPoints.value) {
     if (!map.hasLayer(insarPointsGroup)) insarPointsGroup.addTo(map);
   } else {
@@ -746,7 +868,6 @@ function renderInsarPointsLayer() {
     return;
   }
 
-  // דגימה: לא לצייר מיליונים בפרוטוטייפ
   const maxDraw = 5000;
   const step = Math.max(1, Math.floor(insarPoints.length / maxDraw));
 
@@ -755,7 +876,6 @@ function renderInsarPointsLayer() {
     const v = p.vel_mm_yr;
     const signedV = flipSign.value ? -v : v;
 
-    // צבע פשוט: שקיעה(שלילי) אדום, עליה/הפוך כחול
     const isSink = signedV <= rateThreshold.value;
     const fillColor = isSink ? "#ef4444" : "#3b82f6";
     const opacity = p.coher == null ? 0.45 : Math.max(0.25, Math.min(0.9, p.coher));
@@ -770,7 +890,7 @@ function renderInsarPointsLayer() {
     });
 
     m.bindTooltip(
-      `Vel: ${(v/10).toFixed(2)} cm/yr (${v.toFixed(1)} mm/yr) | Coer: ${p.coher == null ? "—" : p.coher.toFixed(2)} | Topo: ${p.topo_m == null ? "—" : p.topo_m.toFixed(1)} m`,
+      `v: ${v.toFixed(1)} mm/yr | Coer: ${p.coher == null ? "—" : p.coher.toFixed(2)} | Topo: ${p.topo_m == null ? "—" : p.topo_m.toFixed(1)} m`,
       { sticky: true, direction: "top", opacity: 0.95 }
     );
 
@@ -785,6 +905,7 @@ async function loadAndRender() {
   loadErr.value = "";
   loadMsg.value = "טוען בניינים + InSAR…";
   clearSelection();
+  buildingRows.value = [];
 
   sinkingGroup?.clearLayers?.();
   stableGroup?.clearLayers?.();
@@ -794,10 +915,8 @@ async function loadAndRender() {
   allBounds = null;
   allBoundsValid.value = false;
 
-  // 1) load InSAR (optional but strongly recommended)
   await loadInsarPoints();
 
-  // 2) load buildings
   try {
     const r = await fetch(buildingsUrl, { cache: "no-store" });
     if (!r.ok) throw new Error("Buildings GeoJSON load failed: " + r.status);
@@ -825,51 +944,61 @@ async function loadAndRender() {
       else noData++;
 
       const baseStyle = styleFor(st, rate, deltaMm);
-      const layer = L.geoJSON(f, { style: baseStyle, interactive: true });
 
-      // bounds
-      try {
-        const b = layer.getBounds();
-        if (b?.isValid?.()) allBounds = allBounds ? allBounds.extend(b) : b;
-      } catch {}
+      const layer = L.geoJSON(f, {
+        style: baseStyle,
+        onEachFeature: (feat, pathLayer) => {
+          applyHover(pathLayer, baseStyle);
 
-      applyHover(layer, baseStyle);
+          const topoNow = bi.topoNowM;
+          const topoPast = (topoNow == null || deltaMm == null) ? null : (topoNow - (deltaMm/1000));
 
-      const topoNow = bi.topoNowM;
-      const topoPast = (topoNow == null || deltaMm == null) ? null : (topoNow - (deltaMm/1000));
+          const tooltip = [
+            `#pts: ${bi.psCount}`,
+            `v: ${fmt2(rate)} mm/yr`,
+            `Δh(${yrs.toFixed(1)}y): ${fmt2(deltaMm)} mm`,
+            `Topo: ${topoNow == null ? "—" : topoNow.toFixed(1)} m`,
+            `Coer: ${bi.coh == null ? "—" : bi.coh.toFixed(2)}`
+          ].join(" | ");
 
-      const tooltip = [
-        `#pts: ${bi.psCount}`,
-        `v: ${fmt2(rate)} mm/yr`,
-        `Δh(${yrs.toFixed(1)}y): ${fmt2(deltaMm)} mm`,
-        `Topo: ${topoNow == null ? "—" : topoNow.toFixed(1)} m`,
-        `Coer: ${bi.coh == null ? "—" : bi.coh.toFixed(2)}`
-      ].join(" | ");
+          pathLayer.bindTooltip(tooltip, { sticky: true, direction: "top", opacity: 0.95 });
 
-      layer.bindTooltip(tooltip, { sticky: true, direction: "top", opacity: 0.95 });
-
-      layer.on("click", () => {
-        selected.value = {
-          name,
-          status: st,
-          statusLabel: statusLabel(st),
-          psCountLabel: String(bi.psCount),
-          rateLabel: fmt2(rate),
-          rateMode: bi.usedMode,
-          cohLabel: bi.coh == null ? "—" : bi.coh.toFixed(2),
-          topoNowLabel: topoNow == null ? "—" : topoNow.toFixed(2),
-          topoPastLabel: topoPast == null ? "—" : topoPast.toFixed(2),
-          deltaLabel: deltaMm == null ? "—" : deltaMm.toFixed(1),
-          note:
-            !insar.value.loaded ? "אין קובץ InSAR נטען. הוסף data/insar_points.csv כדי לקבל נתונים." :
-            bi.psCount === 0 ? "אין נקודות InSAR ששויכו לבניין (נסה להגדיל Buffer או לבדוק כיסוי נקודות)." :
-            `מבוסס מדיאן של ${bi.psCount} נק׳. אם Coer נמוך או מעט נקודות—קח בזהירות.`,
-        };
+          pathLayer.on("click", () => {
+            selected.value = buildSelectedPayload(name, st, bi, rate, deltaMm, topoNow, topoPast);
+          });
+        }
       });
+
+      let bounds = null;
+      try {
+        bounds = layer.getBounds();
+        if (bounds?.isValid?.()) allBounds = allBounds ? allBounds.extend(bounds) : bounds;
+      } catch {}
 
       if (st === "sinking") layer.addTo(sinkingGroup);
       else if (st === "stable") layer.addTo(stableGroup);
       else layer.addTo(noDataGroup);
+
+      // Store row for analysis/export
+      const topoNow = bi.topoNowM;
+      const topoPast = (topoNow == null || deltaMm == null) ? null : (topoNow - (deltaMm/1000));
+      const conf = confidenceBadge(bi.psCount, bi.coh);
+
+      buildingRows.value.push({
+        key: `${i}-${name}`,
+        name,
+        status: st,
+        psCount: bi.psCount,
+        rate,
+        deltaMm,
+        coh: bi.coh,
+        topoNow,
+        topoPast,
+        bounds,
+        conf,
+        selPayload: buildSelectedPayload(name, st, bi, rate, deltaMm, topoNow, topoPast),
+        srcFeature: f,
+      });
     }
 
     stats.value = { total: feats.length, sinking, stable, noData };
@@ -879,9 +1008,7 @@ async function loadAndRender() {
       try { map.fitBounds(allBounds.pad(0.08)); } catch {}
     }
 
-    // points layer if requested
     renderInsarPointsLayer();
-
     applyVisibility();
 
     loadMsg.value = `נטענו ${feats.length} בניינים. InSAR: ${insar.value.loaded ? `${insar.value.count} נק׳` : "לא נטען"}`;
@@ -892,13 +1019,133 @@ async function loadAndRender() {
   }
 }
 
-function reload() {
-  loadAndRender();
+function buildSelectedPayload(name, st, bi, rate, deltaMm, topoNow, topoPast) {
+  return {
+    name,
+    status: st,
+    statusLabel: statusLabel(st),
+    psCountLabel: String(bi.psCount),
+    rateLabel: fmt2(rate),
+    rateMode: bi.usedMode,
+    cohLabel: bi.coh == null ? "—" : bi.coh.toFixed(2),
+    topoNowLabel: topoNow == null ? "—" : topoNow.toFixed(2),
+    topoPastLabel: topoPast == null ? "—" : topoPast.toFixed(2),
+    deltaLabel: deltaMm == null ? "—" : deltaMm.toFixed(1),
+    note:
+      !insar.value.loaded ? "אין קובץ InSAR נטען. הוסף data/insar_points.csv כדי לקבל נתונים." :
+      bi.psCount === 0 ? "אין נקודות InSAR ששויכו לבניין (נסה להגדיל Buffer או לבדוק כיסוי נקודות)." :
+      `מבוסס מדיאן של ${bi.psCount} נק׳. אם Coer נמוך או מעט נקודות—קח בזהירות.`,
+  };
+}
+
+function zoomToRow(row) {
+  try {
+    if (row?.bounds?.isValid?.()) map.fitBounds(row.bounds.pad(0.15));
+  } catch {}
+  selected.value = row.selPayload || null;
+}
+
+function reload() { loadAndRender(); }
+
+/** Debounced reload for typing */
+let reloadT = null;
+function scheduleReload() {
+  if (reloadT) clearTimeout(reloadT);
+  reloadT = setTimeout(() => loadAndRender(), 220);
 }
 
 watch([rateThreshold, yearsBack, joinBufferM, flipSign, assumeVerticalOnly, colorBy], () => {
   if (!map) return;
-  loadAndRender();
+  scheduleReload();
+});
+
+function downloadText(filename, text, mime="text/plain") {
+  const blob = new Blob([text], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+function exportCsv() {
+  const rows = buildingRows.value;
+  const head = ["name","status","psCount","rate_mm_yr","delta_mm","coh","topo_now_m","topo_past_m"].join(",");
+  const lines = rows.map(r => ([
+    safeCsv(r.name),
+    r.status,
+    r.psCount ?? "",
+    numOrEmpty(r.rate),
+    numOrEmpty(r.deltaMm),
+    numOrEmpty(r.coh),
+    numOrEmpty(r.topoNow),
+    numOrEmpty(r.topoPast),
+  ].join(",")));
+  downloadText(`satmap_buildings_${new Date().toISOString().slice(0,10)}.csv`, [head, ...lines].join("\n"), "text/csv");
+}
+function safeCsv(s) {
+  const t = String(s ?? "");
+  if (t.includes(",") || t.includes('"') || t.includes("\n")) return `"${t.replaceAll('"','""')}"`;
+  return t;
+}
+function numOrEmpty(v) {
+  return v == null || !Number.isFinite(v) ? "" : String(v);
+}
+
+function exportGeojson() {
+  const rows = buildingRows.value;
+  const out = {
+    type: "FeatureCollection",
+    features: rows.map(r => {
+      const f = r.srcFeature;
+      const props = { ...(f?.properties || {}) };
+      props.__satmap = {
+        status: r.status,
+        psCount: r.psCount ?? 0,
+        rate_mm_yr: r.rate,
+        delta_mm: r.deltaMm,
+        coh: r.coh,
+        topo_now_m: r.topoNow,
+        topo_past_m: r.topoPast,
+      };
+      return { type: "Feature", geometry: f.geometry, properties: props };
+    })
+  };
+  downloadText(`satmap_buildings_${new Date().toISOString().slice(0,10)}.geojson`, JSON.stringify(out), "application/geo+json");
+}
+
+/** Analysis list */
+const analysisList = computed(() => {
+  const needle = (q.value || "").trim().toLowerCase();
+  const rows = buildingRows.value
+    .filter(r => r.status === "sinking")
+    .filter(r => (r.psCount ?? 0) >= (minPoints.value ?? 0))
+    .filter(r => (r.coh ?? 0) >= (minCoh.value ?? 0))
+    .filter(r => !needle || String(r.name).toLowerCase().includes(needle));
+
+  const key = sortBy.value;
+  rows.sort((a,b) => {
+    if (key === "coh") return (b.coh ?? -1) - (a.coh ?? -1);
+    if (key === "pts") return (b.psCount ?? 0) - (a.psCount ?? 0);
+    if (key === "delta") return Math.abs(b.deltaMm ?? -Infinity) - Math.abs(a.deltaMm ?? -Infinity);
+    // default: rate most negative first
+    return (a.rate ?? Infinity) - (b.rate ?? Infinity);
+  });
+
+  return rows.slice(0, 40).map(r => {
+    const conf = r.conf || { badge:"LOW", cls:"bLow" };
+    return {
+      ...r,
+      rateLabel: fmt2(r.rate),
+      deltaLabel: r.deltaMm == null ? "—" : r.deltaMm.toFixed(1) + "mm",
+      cohLabel: r.coh == null ? "—" : r.coh.toFixed(2),
+      badge: conf.badge,
+      badgeClass: conf.cls,
+    };
+  });
 });
 
 onMounted(async () => {
@@ -921,16 +1168,17 @@ onMounted(async () => {
 .box { border:1px solid #e5e7eb; border-radius:16px; padding:10px; background:#fff; margin-bottom:10px; }
 label { display:block; font-size:12px; opacity:0.85; margin-bottom:6px; }
 
-input, select, .btn { width:100%; padding:10px; border-radius:12px; border:1px solid #e5e7eb; font-size:14px; background:#fff; }
+input, select { width:100%; padding:10px; border-radius:12px; border:1px solid #e5e7eb; font-size:14px; background:#fff; }
 select { cursor:pointer; }
 
-.btn { cursor:pointer; background:#111827; color:#fff; border-color:#111827; font-weight:700; }
+.btn { cursor:pointer; background:#111827; color:#fff; border:1px solid #111827; font-weight:700; padding:10px; border-radius:12px; width:auto; }
 .btn.ghost { background:#fff; color:#111827; border-color:#e5e7eb; }
 .btn.small { padding:8px 10px; font-size:12px; border-radius:10px; }
 .btn:disabled { opacity:0.55; cursor:not-allowed; }
 
 .row2 { display:grid; grid-template-columns: 1fr 1fr; gap:10px; margin-top:6px; }
 .chk { display:flex; align-items:center; gap:8px; font-size:12px; opacity:0.9; margin-top:8px; }
+.chk input[type="checkbox"] { width:auto; padding:0; margin:0; }
 
 .kpis { display:grid; grid-template-columns: 1fr 1fr; gap:8px; margin-top:10px; }
 .kpi { border:1px solid #e5e7eb; border-radius:12px; padding:10px; background:#f9fafb; }
@@ -969,6 +1217,19 @@ details > summary::-webkit-details-marker { display:none; }
 .glVal { font-size:12px; opacity:0.92; line-height:1.55; }
 .glVal ul { margin:6px 18px 0 0; padding:0; }
 .glVal li { margin:4px 0; }
+
+/* Analysis list */
+.list { display:grid; gap:8px; margin-top:10px; }
+.listItem { text-align:right; border:1px solid #e5e7eb; border-radius:14px; padding:10px; background:#fff; cursor:pointer; }
+.listItem:hover { border-color:#cbd5e1; background:#f8fafc; }
+.liTop { display:flex; align-items:center; justify-content:space-between; gap:10px; }
+.liName { font-weight:900; font-size:13px; }
+.liMeta { margin-top:6px; font-size:12px; opacity:0.85; display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
+.dot { opacity:0.55; }
+.badge { font-size:11px; font-weight:900; padding:4px 8px; border-radius:999px; border:1px solid #e5e7eb; }
+.bHigh { background:#ecfdf5; border-color:#a7f3d0; }
+.bMed  { background:#eff6ff; border-color:#bfdbfe; }
+.bLow  { background:#fff7ed; border-color:#fed7aa; }
 
 @media (max-width: 980px) {
   .layout { grid-template-columns: 1fr; }
