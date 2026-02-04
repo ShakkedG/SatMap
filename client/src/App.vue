@@ -4,7 +4,7 @@
       <div class="top">
         <div>
           <div class="title">SatMap</div>
-          <div class="sub">Buildings Joined (GeoJSON) – תצוגה + סיווג + מקרא + “איך זה עובד”</div>
+          <div class="sub">Buildings Joined (GeoJSON) – תצוגה + סיווג + מקרא + חלון נתונים</div>
         </div>
         <div class="topBtns">
           <button class="btn ghost" @click="fitToLayer" :disabled="!allBoundsValid">התמקד בשכבה</button>
@@ -33,12 +33,17 @@
         <div class="mini err" v-if="loadErr">{{ loadErr }}</div>
 
         <details class="miniBox" v-if="attempts.length">
-          <summary class="sumTitle">בדיקת נתיבים (Debug)</summary>
+          <summary class="sumTitle">(Debug) בדיקת נתיבים</summary>
           <div class="dbg">
             <div v-for="(a,i) in attempts" :key="i" class="dbgRow">
               <span class="mono">{{ a.url }}</span>
               <span class="dbgTag" :class="a.ok ? 'ok' : 'bad'">{{ a.ok ? "OK" : a.note }}</span>
             </div>
+          </div>
+          <div class="hint" style="margin-top:10px">
+            אם אתה רואה שהטענה מצליחה רק מ־raw.githubusercontent — מומלץ לשים את הקובץ ב־
+            <span class="mono">client/public/data/buildings_joined.geojson</span>
+            כדי שייטען מהאתר עצמו.
           </div>
         </details>
       </div>
@@ -99,7 +104,7 @@
               :disabled="useQgisStatus"
               @input="scheduleReload"
             />
-            <div class="hint">בשביל InSAR לרוב זה במ״מ/שנה. אם אצלך זה יוצא “חיובי”, נסה Flip sign.</div>
+            <div class="hint">היחידות תלויות במקור שלך. אם “שקיעה” יוצאת הפוך — נסה Flip sign.</div>
           </div>
 
           <div>
@@ -128,7 +133,7 @@
               :disabled="useQgisStatus"
               @input="scheduleReload"
             />
-            <div class="hint">מתחת לזה → “אין נתון” (או לא יציב)</div>
+            <div class="hint">מתחת לזה → “אין נתון”</div>
           </div>
 
           <div>
@@ -195,73 +200,32 @@
         <div class="mini muted" style="margin-top:10px">
           מצב צביעה:
           <b>{{ colorMode === "status" ? "סטטוס" : colorMode === "rate" ? "Vel_mean" : "Coherence" }}</b>
-          <span v-if="colorMode === 'rate'"> — יותר “חשוד” = אדום חזק יותר</span>
-          <span v-if="colorMode === 'coh'"> — coherence גבוה = אטום יותר</span>
         </div>
       </div>
 
       <!-- ===== How it works ===== -->
-      <details class="box" open>
-        <summary class="sumTitle">איך זה עובד (Data dictionary + לוגיקה)</summary>
-
+      <details class="box">
+        <summary class="sumTitle">איך זה עובד (לוגיקה)</summary>
         <div class="gloss">
           <div class="glRow">
-            <div class="glKey">מאיפה נטען הקובץ?</div>
+            <div class="glKey">סטטוס</div>
             <div class="glVal">
-              האתר מנסה כמה נתיבים עד שאחד מצליח:
-              <ul>
-                <li class="mono">{{ baseUrl }}buildings_joined.geojson</li>
-                <li class="mono">{{ baseUrl }}data/buildings_joined.geojson</li>
-                <li class="mono">raw.githubusercontent.com (fallback)</li>
-              </ul>
-              הסיבה: GitHub Pages בפרויקט (repo) יושב תחת <span class="mono">/SatMap/</span>, אז צריך לעבוד עם <span class="mono">BASE_URL</span>.
+              אם מסומן “להשתמש ב־status מהקובץ” — האתר משתמש ישירות ב־<span class="mono">status</span> שאתה חישבת ב־QGIS.<br />
+              אחרת — האתר מחשב לפי:
+              <div class="mono" style="margin-top:6px">
+                אם Vel_count &lt; minPts → no_data<br/>
+                אחרת אם coer_mean &lt; minCoh → low_quality<br/>
+                אחרת אם Vel_mean ≤ rateThreshold → suspected_subsidence<br/>
+                אחרת → stable
+              </div>
             </div>
           </div>
 
           <div class="glRow">
-            <div class="glKey">אילו שדות אנחנו משתמשים?</div>
+            <div class="glKey">Vel_mean / coer_mean / Vel_count</div>
             <div class="glVal">
-              הקוד מחפש את השמות בצורה “חכמה” (לא רגיש לאותיות גדולות/קטנות):
-              <ul>
-                <li><b>status</b> → <span class="mono">status / STATUS / Status</span></li>
-                <li><b>Vel_mean</b> → <span class="mono">Vel_mean / vel_mean / VEL_MEAN</span></li>
-                <li><b>Vel_count</b> → <span class="mono">Vel_count / vel_count / VEL_COUNT</span></li>
-                <li><b>coer_mean</b> → <span class="mono">coer_mean / COER_MEAN / coh_mean</span></li>
-              </ul>
-              אם חסר שדה — יופיע “—” בכלי־עזר (tooltip) ובפאנל.
-            </div>
-          </div>
-
-          <div class="glRow">
-            <div class="glKey">איך נקבע סטטוס?</div>
-            <div class="glVal">
-              יש 2 מצבים:
-              <ul>
-                <li><b>Use QGIS status</b>: משתמשים ב־<span class="mono">status</span> שכבר חישבת ב־QGIS.</li>
-                <li><b>Recompute</b>: מחשבים מחדש לפי הספים בפאנל:
-                  <div class="mono" style="margin-top:6px">
-                    אם Vel_count &lt; minPts → no_data<br/>
-                    אחרת אם coer_mean &lt; minCoh → low_quality<br/>
-                    אחרת אם Vel_mean ≤ rateThreshold → suspected_subsidence<br/>
-                    אחרת → stable
-                  </div>
-                </li>
-              </ul>
-            </div>
-          </div>
-
-          <div class="glRow">
-            <div class="glKey">למה יש Flip sign?</div>
-            <div class="glVal">
-              לפעמים בדאטה כיוון הסימן הפוך (למשל שקיעה יוצאת חיובית).  
-              Flip sign מאפשר לבדוק מהר אם זה “מתיישר” עם ההיגיון, בלי לחזור ל־QGIS.
-            </div>
-          </div>
-
-          <div class="glRow">
-            <div class="glKey">למה הצבעים/מקווקו?</div>
-            <div class="glVal">
-              “איכות נמוכה” ו“אין נתון” מקבלים דפוס מקווקו כדי להבדיל ברור מהמצבים האחרים גם כשיש זום רחוק.
+              אלו שדות שאתה כבר יצרת מתוך שיוך נקודות InSAR לבניינים (למשל Spatial Join + סיכומים).<br />
+              בחלון הנתונים של כל בניין תראה גם “מה זה אומר” לכל שדה.
             </div>
           </div>
         </div>
@@ -292,7 +256,7 @@
             :key="r.key"
             class="listItem"
             @click="zoomToRow(r)"
-            :title="'זום + פרטים'"
+            :title="'זום + חלון נתונים'"
           >
             <div class="liTop">
               <div class="liName">{{ r.name }}</div>
@@ -313,29 +277,29 @@
         </div>
       </details>
 
-      <!-- ===== Selected ===== -->
+      <!-- ===== Selected (compact) ===== -->
       <div class="box" v-if="selected">
         <div class="selHeader">
           <div class="mini"><b>{{ selected.name }}</b></div>
-          <button class="btn ghost small" @click="clearSelection">נקה בחירה</button>
+          <div class="topBtns">
+            <button class="btn ghost small" @click="openInfo">פתח חלון נתונים</button>
+            <button class="btn ghost small" @click="clearSelection">נקה</button>
+          </div>
         </div>
 
         <div class="selGrid">
           <div class="selCard">
-            <div class="k">status (בשימוש)</div>
+            <div class="k">סטטוס</div>
             <div class="v" :class="{ danger: selected.bucket === 'sinking' }">{{ selected.status }}</div>
           </div>
-
           <div class="selCard">
             <div class="k">Vel_mean</div>
             <div class="v mono">{{ selected.velMean }}</div>
           </div>
-
           <div class="selCard">
             <div class="k">coer_mean</div>
             <div class="v mono">{{ selected.cohMean }}</div>
           </div>
-
           <div class="selCard">
             <div class="k">Vel_count</div>
             <div class="v mono">{{ selected.velCount }}</div>
@@ -347,6 +311,147 @@
     <main class="mapWrap">
       <div id="map"></div>
     </main>
+
+    <!-- ===== Modal: Feature Info ===== -->
+    <div v-if="infoOpen" class="modalBack" @click.self="closeInfo">
+      <div class="modal">
+        <div class="modalHeader">
+          <div class="mhLeft">
+            <div class="mhTitle">נתוני בניין</div>
+            <div class="mhSub mono">{{ selected?.name || "—" }}</div>
+          </div>
+          <button class="iconBtn" @click="closeInfo" title="סגור">✕</button>
+        </div>
+
+        <div class="modalBody">
+          <div class="tabs">
+            <button class="tab" :class="{ on: infoTab === 'main' }" @click="infoTab = 'main'">שדות מרכזיים</button>
+            <button class="tab" :class="{ on: infoTab === 'all' }" @click="infoTab = 'all'">כל השדות</button>
+            <button class="tab" :class="{ on: infoTab === 'logic' }" @click="infoTab = 'logic'">איך נקבע</button>
+          </div>
+
+          <!-- ===== MAIN ===== -->
+          <div v-if="infoTab === 'main'" class="grid2">
+            <div class="infoCard">
+              <div class="k">status</div>
+              <div class="v">{{ selected?.status || "—" }}</div>
+              <div class="desc">
+                קטגוריית הבניין (למשל <span class="mono">stable</span>, <span class="mono">suspected_subsidence</span>, <span class="mono">low_quality</span>, <span class="mono">no_data</span>).<br/>
+                אם מסומן “להשתמש ב־status מהקובץ” — זה מגיע ישירות מ־QGIS. אחרת זה מחושב לפי הספים בפאנל.
+              </div>
+            </div>
+
+            <div class="infoCard">
+              <div class="k">Vel_mean</div>
+              <div class="v mono">{{ selected?.velMean || "—" }}</div>
+              <div class="desc">
+                ממוצע מהירות/קצב תזוזה שחושב לבניין מתוך נקודות InSAR ששויכו אליו.<br/>
+                <b>חשוב:</b> היחידות והכיוון תלויים במקור הנתונים שלך; אם נראה שהסימן הפוך, אפשר להפעיל <b>Flip sign</b> ולבדוק.
+              </div>
+            </div>
+
+            <div class="infoCard">
+              <div class="k">coer_mean</div>
+              <div class="v mono">{{ selected?.cohMean || "—" }}</div>
+              <div class="desc">
+                ממוצע/מדד coherence (לרוב בין 0 ל־1). גבוה יותר בדרך כלל אומר שהמדידה יציבה/אמינה יותר.<br/>
+                אם הערך נמוך מהסף בפאנל — האתר יכול לסמן “איכות נמוכה”.
+              </div>
+            </div>
+
+            <div class="infoCard">
+              <div class="k">Vel_count</div>
+              <div class="v mono">{{ selected?.velCount || "—" }}</div>
+              <div class="desc">
+                כמה נקודות InSAR השתתפו בחישוב של הבניין (מספר הדגימות ששויכו לפוליגון).<br/>
+                מעט נקודות → אמינות נמוכה יותר; מתחת לסף בפאנל → “אין נתון”.
+              </div>
+            </div>
+
+            <div class="infoCard" v-if="selected?.objectId != null">
+              <div class="k">OBJECTID</div>
+              <div class="v mono">{{ selected.objectId }}</div>
+              <div class="desc">
+                מזהה ייחודי של הפיצ’ר בשכבה (נוח לחיפוש/השוואה).
+              </div>
+            </div>
+
+            <div class="infoCard">
+              <div class="k">טיפ שימושי</div>
+              <div class="v">מה לבדוק אם משהו “לא הגיוני”</div>
+              <div class="desc">
+                1) נסה <b>Flip sign</b>.<br/>
+                2) נסה להוריד/להעלות את <b>סף החשוד</b>.<br/>
+                3) תסתכל על <b>Vel_count</b> ו־<b>coer_mean</b> כדי להבין אמינות.
+              </div>
+            </div>
+          </div>
+
+          <!-- ===== ALL FIELDS ===== -->
+          <div v-if="infoTab === 'all'">
+            <div class="mini muted" style="margin-bottom:10px">
+              כאן מוצגים כל ה־properties כמו שהם בקובץ (ללא סינון).
+            </div>
+
+            <div class="kvTable">
+              <div class="kvRow" v-for="(v,k) in selected?.rawProps || {}" :key="k">
+                <div class="kvKey mono">{{ k }}</div>
+                <div class="kvVal mono">{{ stringifyVal(v) }}</div>
+              </div>
+              <div v-if="!selected?.rawProps" class="mini muted">אין properties זמינים</div>
+            </div>
+          </div>
+
+          <!-- ===== LOGIC ===== -->
+          <div v-if="infoTab === 'logic'" class="logicBox">
+            <div class="lg">
+              <div class="lgTitle">מקור הסטטוס הנוכחי</div>
+              <div class="lgText">
+                <span v-if="useQgisStatus">
+                  מסומן “להשתמש ב־status מהקובץ” → הסטטוס נלקח מהשדה <span class="mono">status</span>.
+                </span>
+                <span v-else>
+                  הסטטוס מחושב מהשדות <span class="mono">Vel_mean</span>, <span class="mono">coer_mean</span>, <span class="mono">Vel_count</span>.
+                </span>
+              </div>
+            </div>
+
+            <div class="lg">
+              <div class="lgTitle">הספים (כמו בפאנל)</div>
+              <div class="lgText mono">
+                rateThreshold = {{ rateThreshold }}<br/>
+                minCoh = {{ minCoh }}<br/>
+                minPts = {{ minPts }}<br/>
+                flipSign = {{ flipSign ? "true" : "false" }}
+              </div>
+            </div>
+
+            <div class="lg" v-if="!useQgisStatus">
+              <div class="lgTitle">כלל חישוב</div>
+              <div class="lgText mono">
+                אם Vel_count &lt; minPts → no_data<br/>
+                אחרת אם coer_mean &lt; minCoh → low_quality<br/>
+                אחרת אם Vel_mean ≤ rateThreshold → suspected_subsidence<br/>
+                אחרת → stable
+              </div>
+            </div>
+
+            <div class="lg">
+              <div class="lgTitle">מה נחשב “אמין” יותר?</div>
+              <div class="lgText">
+                בדרך כלל: <b>Vel_count גבוה</b> + <b>coer_mean גבוה</b> → תוצאה יציבה יותר.
+                אם אחד מהם נמוך — קח את הסיווג בזהירות.
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="modalFooter">
+          <button class="btn ghost" @click="fitToSelected" :disabled="!selected?.boundsValid">התמקד בבניין</button>
+          <button class="btn" @click="closeInfo">סגור</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -384,6 +489,10 @@ const listMinCoh = ref(0.35);
 
 const stats = ref({ total: 0, sinking: 0, stable: 0, lowq: 0, noData: 0 });
 const selected = ref(null);
+
+// Modal
+const infoOpen = ref(false);
+const infoTab = ref("main");
 
 // ===== Leaflet =====
 let map = null;
@@ -423,6 +532,14 @@ function pickField(props, candidates) {
   return "";
 }
 
+function stringifyVal(v) {
+  if (v == null) return "null";
+  if (typeof v === "object") {
+    try { return JSON.stringify(v); } catch { return String(v); }
+  }
+  return String(v);
+}
+
 function buildingsCandidates() {
   const ts = Date.now();
   return [
@@ -450,7 +567,7 @@ async function fetchFirstOk(urls) {
     }
   }
   attempts.value = localAttempts;
-  throw new Error(localAttempts.at(-1)?.note ? `Load failed (${localAttempts.at(-1).note})` : "Load failed");
+  throw new Error("Load failed (no valid URL)");
 }
 
 function initMap() {
@@ -499,7 +616,11 @@ function fitToLayer() {
     try { map.fitBounds(allBounds.pad(0.08)); } catch {}
   }
 }
-function clearSelection() { selected.value = null; }
+
+function clearSelection() {
+  selected.value = null;
+  infoOpen.value = false;
+}
 
 function pickName(props, idx) {
   const f = pickField(props, ["name","NAME","building_id","id","OBJECTID","objectid","UNIQ_ID","uniq_id"]);
@@ -507,7 +628,7 @@ function pickName(props, idx) {
   return `בניין ${idx + 1}`;
 }
 
-/** Normalize "status" text from QGIS (or anything else) */
+/** Normalize "status" text */
 function normalizeStatusText(raw) {
   const s = String(raw ?? "").trim().toLowerCase();
   if (!s) return "no_data";
@@ -517,16 +638,12 @@ function normalizeStatusText(raw) {
   if (s.includes("no_data") || s.includes("nodata") || s === "null") return "no_data";
   return s;
 }
-
-/** Decide bucket (sinking/stable/lowq/nodata) */
 function bucketFromStatus(norm) {
   if (norm === "suspected_subsidence" || norm === "sinking") return "sinking";
   if (norm === "stable") return "stable";
   if (norm === "low_quality") return "lowq";
   return "nodata";
 }
-
-/** Recompute status from numeric fields (if not using QGIS status) */
 function computeStatusFromFields(velMean, cohMean, velCount) {
   const c = velCount ?? null;
   const coh = cohMean ?? null;
@@ -543,7 +660,6 @@ function computeStatusFromFields(velMean, cohMean, velCount) {
 
 /** Styling */
 function styleFor(bucket, vAdj, cohMeanVal) {
-  // Base styles by category
   if (bucket === "nodata") {
     return { color: "#64748b", weight: 2.0, opacity: 0.85, fill: true, fillColor: "#cbd5e1", fillOpacity: 0.18, dashArray: "6 6" };
   }
@@ -551,7 +667,6 @@ function styleFor(bucket, vAdj, cohMeanVal) {
     return { color: "#b45309", weight: 2.0, opacity: 0.9, fill: true, fillColor: "#f59e0b", fillOpacity: 0.20, dashArray: "5 4" };
   }
   if (bucket === "stable") {
-    // stable light
     const fo = colorMode.value === "coh" ? opacityFromCoh(cohMeanVal, 0.15, 0.35) : 0.25;
     return { color: "#1d4ed8", weight: 2.0, opacity: 0.9, fill: true, fillColor: "#60a5fa", fillOpacity: fo };
   }
@@ -559,10 +674,9 @@ function styleFor(bucket, vAdj, cohMeanVal) {
   // sinking
   let fillOpacity = 0.45;
   if (colorMode.value === "rate" && vAdj != null) {
-    // make stronger red when more negative than threshold
     const thr = rateThreshold.value ?? -2;
     const ratio = thr === 0 ? 1 : Math.abs(vAdj / thr);
-    const s = clamp01((ratio - 1) / 2); // 0..1
+    const s = clamp01((ratio - 1) / 2);
     fillOpacity = 0.28 + s * 0.55;
   } else if (colorMode.value === "coh") {
     fillOpacity = opacityFromCoh(cohMeanVal, 0.25, 0.55);
@@ -573,7 +687,6 @@ function styleFor(bucket, vAdj, cohMeanVal) {
 function clamp01(x) { return Math.max(0, Math.min(1, x)); }
 function opacityFromCoh(coh, min=0.2, max=0.7) {
   if (coh == null) return min;
-  // coherence 0..1 map
   const t = clamp01(coh);
   return min + (max - min) * t;
 }
@@ -592,6 +705,21 @@ function applyHover(pathLayer, baseStyle) {
   pathLayer.on("mouseout", () => {
     try { pathLayer.setStyle?.(baseStyle); } catch {}
   });
+}
+
+function openInfo() {
+  if (!selected.value) return;
+  infoOpen.value = true;
+  infoTab.value = "main";
+}
+function closeInfo() { infoOpen.value = false; }
+
+function fitToSelected() {
+  try {
+    if (selected.value?.bounds && selected.value.bounds.isValid()) {
+      map.fitBounds(selected.value.bounds.pad(0.15));
+    }
+  } catch {}
 }
 
 async function loadAndRender() {
@@ -624,10 +752,12 @@ async function loadAndRender() {
       const velMeanField = pickField(props, ["Vel_mean","vel_mean","VEL_MEAN"]);
       const velCountField = pickField(props, ["Vel_count","vel_count","VEL_COUNT"]);
       const cohMeanField = pickField(props, ["coer_mean","Coer_mean","COER_MEAN","coh_mean","Coh_mean"]);
+      const objectIdField = pickField(props, ["OBJECTID","objectid","ObjectID","id","ID"]);
 
       const velMean = velMeanField ? toNum(props[velMeanField]) : null;
       const velCount = velCountField ? toNum(props[velCountField]) : null;
       const cohMean = cohMeanField ? toNum(props[cohMeanField]) : null;
+      const objectId = objectIdField ? props[objectIdField] : null;
 
       let normStatus, bucket, vAdj;
 
@@ -665,6 +795,7 @@ async function loadAndRender() {
           pathLayer.bindTooltip(tt, { sticky: true, direction: "top", opacity: 0.95 });
 
           pathLayer.on("click", () => {
+            const b = (() => { try { return layer.getBounds(); } catch { return null; } })();
             selected.value = {
               name,
               status: normStatus || "—",
@@ -672,14 +803,19 @@ async function loadAndRender() {
               velMean: fmt2(vAdj),
               cohMean: fmt2(cohMean),
               velCount: velCount ?? "—",
+              objectId: objectId,
+              rawProps: props,
+              bounds: b,
+              boundsValid: !!b?.isValid?.()
             };
+            openInfo(); // פותח חלון נתונים אוטומטית בלחיצה
           });
         },
       });
 
       try {
-        const b = layer.getBounds();
-        if (b?.isValid?.()) allBounds = allBounds ? allBounds.extend(b) : b;
+        const b2 = layer.getBounds();
+        if (b2?.isValid?.()) allBounds = allBounds ? allBounds.extend(b2) : b2;
       } catch {}
 
       if (bucket === "sinking") layer.addTo(sinkingGroup);
@@ -696,6 +832,7 @@ async function loadAndRender() {
         cohMean,
         velCount,
         bounds: (() => { try { return layer.getBounds(); } catch { return null; } })(),
+        objectId: objectId
       });
     }
 
@@ -715,20 +852,6 @@ async function loadAndRender() {
   }
 }
 
-function zoomToRow(r) {
-  try {
-    if (r?.bounds?.isValid?.()) map.fitBounds(r.bounds.pad(0.15));
-  } catch {}
-  selected.value = {
-    name: r.name,
-    status: r.status,
-    bucket: r.bucket,
-    velMean: fmt2(r.velAdj),
-    cohMean: fmt2(r.cohMean),
-    velCount: r.velCount ?? "—",
-  };
-}
-
 function reload() { loadAndRender(); }
 
 // ===== suspects list =====
@@ -738,8 +861,8 @@ const suspectsList = computed(() => {
   return rows.value
     .filter(r => r.bucket === "sinking")
     .filter(r => (r.cohMean ?? 0) >= (listMinCoh.value ?? 0))
-    .filter(r => !needle || String(r.name).toLowerCase().includes(needle) || String(r.name).includes(needle))
-    .sort((a,b) => (a.velAdj ?? Infinity) - (b.velAdj ?? Infinity)) // יותר שלילי ראשון
+    .filter(r => !needle || String(r.name).toLowerCase().includes(needle) || String(r.objectId ?? "").includes(needle))
+    .sort((a,b) => (a.velAdj ?? Infinity) - (b.velAdj ?? Infinity))
     .slice(0, 40)
     .map(r => ({
       ...r,
@@ -754,6 +877,26 @@ let t = null;
 function scheduleReload() {
   if (t) clearTimeout(t);
   t = setTimeout(() => loadAndRender(), 200);
+}
+
+function zoomToRow(r) {
+  try {
+    if (r?.bounds?.isValid?.()) map.fitBounds(r.bounds.pad(0.15));
+  } catch {}
+
+  selected.value = {
+    name: r.name,
+    status: r.status || "—",
+    bucket: r.bucket,
+    velMean: fmt2(r.velAdj),
+    cohMean: fmt2(r.cohMean),
+    velCount: r.velCount ?? "—",
+    objectId: r.objectId,
+    rawProps: null,
+    bounds: r.bounds || null,
+    boundsValid: !!r.bounds?.isValid?.()
+  };
+  openInfo();
 }
 
 onMounted(async () => {
@@ -828,8 +971,6 @@ details > summary::-webkit-details-marker { display:none; }
 .glRow { border:1px solid #e5e7eb; border-radius:14px; padding:10px; background:#fff; }
 .glKey { font-weight:900; margin-bottom:6px; }
 .glVal { font-size:12px; opacity:0.92; line-height:1.55; }
-.glVal ul { margin:6px 18px 0 0; padding:0; }
-.glVal li { margin:4px 0; }
 
 .list { display:grid; gap:8px; margin-top:10px; }
 .listItem { text-align:right; border:1px solid #e5e7eb; border-radius:14px; padding:10px; background:#fff; cursor:pointer; }
@@ -848,9 +989,79 @@ details > summary::-webkit-details-marker { display:none; }
 .dbgTag.ok { background:#ecfdf5; border-color:#a7f3d0; }
 .dbgTag.bad { background:#fef2f2; border-color:#fecaca; color:#991b1b; }
 
+.iconBtn { width:36px; height:36px; border-radius:10px; border:1px solid #e5e7eb; background:#fff; cursor:pointer; font-weight:900; }
+
 @media (max-width: 980px) {
   .layout { grid-template-columns: 1fr; }
   .panel { height: 54vh; border-left:none; border-bottom:1px solid #e5e7eb; }
   #map { height: 46vh; }
 }
+
+/* ===== Modal ===== */
+.modalBack {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.55);
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+.modal {
+  width: min(920px, 96vw);
+  max-height: 92vh;
+  background: #fff;
+  border-radius: 18px;
+  border: 1px solid #e5e7eb;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.25);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.modalHeader {
+  padding: 12px 12px;
+  border-bottom: 1px solid #e5e7eb;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.mhTitle { font-weight: 900; font-size: 15px; }
+.mhSub { font-size: 12px; opacity: 0.75; margin-top: 2px; }
+.modalBody {
+  padding: 12px;
+  overflow: auto;
+}
+.modalFooter {
+  padding: 12px;
+  border-top: 1px solid #e5e7eb;
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.tabs { display:flex; gap:8px; align-items:center; margin-bottom: 10px; flex-wrap: wrap; }
+.tab { cursor:pointer; border:1px solid #e5e7eb; background:#fff; padding:8px 10px; border-radius: 999px; font-weight: 900; font-size: 12px; }
+.tab.on { border-color:#111827; }
+
+.grid2 { display:grid; grid-template-columns: 1fr 1fr; gap:10px; }
+.infoCard { border:1px solid #e5e7eb; border-radius:14px; padding:10px; background:#f9fafb; }
+.infoCard .k { font-size:12px; opacity:0.7; }
+.infoCard .v { font-weight:900; font-size:14px; margin-top:4px; }
+.infoCard .desc { margin-top:8px; font-size:12px; line-height:1.5; opacity: 0.92; }
+@media (max-width: 820px) {
+  .grid2 { grid-template-columns: 1fr; }
+}
+
+.kvTable { border:1px solid #e5e7eb; border-radius:14px; overflow:hidden; }
+.kvRow { display:grid; grid-template-columns: 240px 1fr; gap:10px; padding:10px; border-top:1px solid #e5e7eb; }
+.kvRow:first-child { border-top:none; }
+.kvKey { font-weight:900; font-size:12px; opacity:0.9; }
+.kvVal { font-size:12px; opacity:0.9; word-break: break-word; }
+
+.logicBox { display:grid; gap:10px; }
+.lg { border:1px solid #e5e7eb; border-radius:14px; padding:10px; background:#fff; }
+.lgTitle { font-weight:900; margin-bottom:6px; }
+.lgText { font-size:12px; opacity:0.92; line-height: 1.55; }
 </style>
