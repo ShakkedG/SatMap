@@ -4,7 +4,7 @@
       <div class="panelHeader">
         <div class="brand">
           <div class="title">SatMap</div>
-          <div class="sub">קובץ משולב: בניינים + סטטיסטיקות InSAR</div>
+          <div class="sub">בניינים + סטטיסטיקות InSAR + Tiles (מוכן לפרודקשן)</div>
         </div>
         <button class="iconBtn" @click="panelOpen = !panelOpen" title="פתח/סגור">☰</button>
       </div>
@@ -18,26 +18,92 @@
       <!-- CONTROLS -->
       <section v-show="activeTab==='controls'" class="tabPage">
         <div class="card">
-          <div class="cardTitle">קובץ משולב</div>
+          <div class="cardTitle">שכבות ותצוגה</div>
+
+          <div class="row2">
+            <div>
+              <label>רקע</label>
+              <select v-model="ui.baseMap" @change="applyBaseLayer()">
+                <option value="imagery">לוויין (Esri)</option>
+                <option value="osm">מפה (OSM)</option>
+              </select>
+              <div class="hint mini">ברירת מחדל: לוויין</div>
+            </div>
+
+            <div>
+              <label>מקור בניינים</label>
+              <select v-model="ui.buildingsMode" @change="applyBuildingsSource(true)">
+                <option value="auto">אוטומטי (מומלץ)</option>
+                <option value="tiles">Vector Tiles (שרת)</option>
+                <option value="geojson">GeoJSON (קובץ)</option>
+                <option value="osm">OSM סביב קליק (fallback)</option>
+                <option value="none">ללא</option>
+              </select>
+              <div class="hint mini">
+                בפועל: <b>{{ buildingsEffectiveLabel }}</b>
+              </div>
+            </div>
+          </div>
 
           <div class="row2">
             <div class="colSpan2">
-              <label>GeoJSON (בניינים + Vel_mean + coer_mean + Vel_count)</label>
-              <input v-model.trim="paths.buildings" type="text" />
+              <label>שרת Tiles (Render)</label>
+              <input v-model.trim="paths.tilesBase" type="text" />
               <div class="hint mini">
-                נטען אוטומטית בעת פתיחת העמוד. שינוי נתיב כאן יטען מחדש תוך שנייה.
+                בדיקה: <code>{{ sanitizeUrl(paths.tilesBase) }}/status</code>
+              </div>
+
+              <div class="statusBox" style="margin-top:8px;">
+                <div class="statusLine">
+                  <span class="statusDot" :class="{ on: tilesReady }"></span>
+                  <span>
+                    Tiles:
+                    <span v-if="tilesChecking">בודק…</span>
+                    <span v-else>{{ tilesReady ? "מוכן (ready=true)" : "לא מוכן (ready=false/לא זמין)" }}</span>
+                  </span>
+                </div>
+                <div class="hint mini" v-if="tilesMsg">{{ tilesMsg }}</div>
+              </div>
+
+              <div class="rowBtns" style="margin-top:8px;">
+                <button class="btn ghost" @click="checkTilesStatus" :disabled="tilesChecking">בדוק שרת</button>
+                <button class="btn" @click="applyBuildingsSource(true)" :disabled="loading">החל</button>
               </div>
             </div>
           </div>
 
           <div class="rowBtns">
-            <button class="btn ghost" @click="fitToLayer" :disabled="!hasBounds">התמקד בשכבה</button>
-            <button class="btn" @click="recolorAll" :disabled="!ready || loading">רענן צבעים</button>
+            <button class="btn ghost" @click="fitToLayer" :disabled="!mapReady">התמקד (שכבה/ישראל)</button>
+            <button class="btn" @click="recolorAll" :disabled="!mapReady || loading">רענן צבעים</button>
           </div>
 
-          <div class="hint">
-            הקובץ צריך להיות בתוך <b>client/public/data</b> ואז הנתיב יהיה:
-            <code>{{ baseUrl }}data/buildings_joined.geojson</code>
+          <div class="hint" v-if="ui.buildingsMode==='osm' || buildingsEffective==='osm'">
+            במצב OSM: לחץ על המפה כדי למשוך בניינים סביב הנקודה (שימוש זמני בלבד).
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="cardTitle">GeoJSON (רק אם משתמשים במקור קובץ)</div>
+
+          <div class="row2">
+            <div class="colSpan2">
+              <label>GeoJSON (בניינים + Vel_mean + coer_mean + Vel_count)</label>
+              <input v-model.trim="paths.buildings" type="text" :disabled="buildingsEffective !== 'geojson'" />
+              <div class="hint mini">
+                הקובץ צריך להיות בתוך <b>client/public/data</b> ואז הנתיב יהיה:
+                <code>{{ baseUrl }}data/buildings_joined.geojson</code>
+              </div>
+            </div>
+          </div>
+
+          <div class="statusBox">
+            <div class="statusLine">
+              <span class="statusDot" :class="{ on: geojsonLoaded }"></span>
+              <span>{{ geojsonLoaded ? "GeoJSON נטען" : "GeoJSON לא נטען" }}</span>
+            </div>
+            <div class="hint mini" v-if="lastLoadedUrl">
+              נטען מ: <code>{{ lastLoadedUrl }}</code>
+            </div>
           </div>
         </div>
 
@@ -152,7 +218,7 @@
 
             <div class="miniExplain">
               <span class="miniTag">low_quality</span> = coherence נמוך או מעט נקודות<br />
-              <span class="miniTag">no_data</span> = חסרים נתונים לבניין בקובץ
+              <span class="miniTag">no_data</span> = חסרים נתונים לבניין במקור הנתונים
             </div>
 
             <div class="rowBtns" style="margin-top:10px;">
@@ -165,11 +231,11 @@
           <div class="cardTitle">מצב</div>
           <div class="statusBox">
             <div class="statusLine">
-              <span class="statusDot" :class="{ on: ready }"></span>
+              <span class="statusDot" :class="{ on: mapReady }"></span>
               <span>{{ status }}</span>
             </div>
-            <div class="hint mini" v-if="lastLoadedUrl">
-              נטען מ: <code>{{ lastLoadedUrl }}</code>
+            <div class="hint mini" v-if="loading">
+              {{ loadingText }}
             </div>
           </div>
         </div>
@@ -184,8 +250,12 @@
             <div class="legRow"><span class="sw s-subs"></span> שוקע (v &lt; סף)</div>
             <div class="legRow"><span class="sw s-sus"></span> חשוד (קרוב לסף)</div>
             <div class="legRow"><span class="sw s-stable"></span> יציב</div>
-            <div class="legRow"><span class="sw s-lowq"></span> איכות נמוכה</div>
+            <div class="legRow"><span class="sw s-lowq"></span> איכות נמוכה (coh/נק׳)</div>
             <div class="legRow"><span class="sw s-nodata"></span> אין נתונים</div>
+          </div>
+
+          <div class="hint mini">
+            טיפ: כדי לראות בניינים מ־Tiles — לרוב צריך זום <b>15–16</b>.
           </div>
         </div>
       </section>
@@ -193,47 +263,29 @@
       <!-- ABOUT -->
       <section v-show="activeTab==='about'" class="tabPage">
         <div class="card">
-          <div class="cardTitle">איך מחושב הסטטוס</div>
-          <div class="p">
-            משתמשים בשדות שכבר קיימים לכל בניין בקובץ המשולב:
-            <ul class="ul">
-              <li><b>Vel_mean</b> – ממוצע מהירות (mm/yr)</li>
-              <li><b>coer_mean</b> – ממוצע coherence (0–1)</li>
-              <li><b>Vel_count</b> – כמות נקודות שהשתתפו</li>
-            </ul>
-
-            סטטוס:
-            <ul class="ul">
-              <li><b>no_data</b>: חסרים נתונים או 0 נקודות</li>
-              <li><b>low_quality</b>: coher_mean מתחת לסף או Vel_count קטן מהמינימום</li>
-              <li><b>subsiding</b>: איכות תקינה ו־Vel_mean קטן (שלילי יותר) מהסף</li>
-              <li><b>suspect</b>: איכות תקינה ו־Vel_mean קרוב לסף (±0.5)</li>
-              <li><b>stable</b>: איכות תקינה ו־Vel_mean לא עובר את הסף</li>
-            </ul>
+          <div class="cardTitle">איך זה עובד</div>
+          <div class="about">
+            <p>
+              האתר מציג שכבת בניינים ומחשב לכל בניין סטטוס על בסיס השדות:
+              <b>Vel_mean</b>, <b>coer_mean</b>, <b>Vel_count</b>.
+            </p>
+            <p>
+              לפרודקשן: שכבת הבניינים צריכה להיות <b>Vector Tiles</b> (מהשרת). ה-GeoJSON נשאר רק כ-fallback/בדיקות.
+            </p>
           </div>
         </div>
       </section>
     </aside>
 
-    <main class="mapWrap">
+    <main class="main">
       <div id="map"></div>
 
-      <div class="topRight">
-        <div class="pill">רחף: טולטיפ (ימינה מהעכבר) • קליק: פירוט</div>
-      </div>
+      <!-- Tooltip -->
+      <div ref="hoverRef" v-show="hover.show" class="tip" :style="tipStyle" v-html="hover.html"></div>
 
-      <!-- Hover tooltip -->
-      <div
-        v-show="hover.show"
-        ref="hoverRef"
-        class="hoverTip"
-        :style="hoverStyle"
-        v-html="hover.html"
-      />
-
-      <div v-show="loading" class="loader">
-        <div class="spin"></div>
-        <div class="txt">{{ loadingText }}</div>
+      <div v-if="loading" class="loadingOverlay">
+        <div class="spinner"></div>
+        <div class="loadingText">{{ loadingText }}</div>
       </div>
     </main>
   </div>
@@ -242,11 +294,18 @@
 <script setup>
 import { computed, onMounted, onBeforeUnmount, reactive, ref, watch } from "vue";
 
+/**
+ * חשוב: זה מוסיף VectorGrid ל-Leaflet הגלובלי (window.L).
+ * דורש שהוספת leaflet.vectorgrid ל-package.json
+ */
+import "leaflet.vectorgrid/dist/Leaflet.VectorGrid.bundled.js";
+
 const baseUrl = import.meta.env.BASE_URL || "/";
 
 const paths = reactive({
   // חשוב: בלי סלש בסוף
   buildings: baseUrl + "data/buildings_joined.geojson",
+  tilesBase: "https://satmap-tiles.onrender.com",
 });
 
 const params = reactive({
@@ -257,42 +316,57 @@ const params = reactive({
 
 const ui = reactive({
   filterSubs: false,
+  baseMap: "imagery",         // imagery | osm
+  buildingsMode: "auto",      // auto | tiles | geojson | osm | none
 });
 
 const panelOpen = ref(true);
 const activeTab = ref("controls");
 
-const status = ref("טוען אוטומטית…");
+const status = ref("טוען…");
 const loading = ref(false);
 const loadingText = ref("טוען…");
-const lastLoadedUrl = ref("");
+
+const tilesReady = ref(false);
+const tilesChecking = ref(false);
+const tilesMsg = ref("");
+
+const selected = ref(null); // { id, st, feature?, props? }
 
 const hover = reactive({ show: false, x: 0, y: 0, html: "", _flip: false, _w: 260 });
 const hoverRef = ref(null);
 
-const selected = ref(null); // { id, st, feature }
-const ready = ref(false);
-const hasBounds = ref(false);
+const mapReady = ref(false);
+const geojsonLoaded = ref(false);
 
 let map = null;
-let buildingsLayer = null;
-let buildingsFC = null;
+let baseLayer = null;
+let labelsLayer = null;
+
+let buildingsLayer = null;   // GeoJSON layer OR VectorGrid layer
+let buildingsFC = null;      // GeoJSON cache
+let osmLayer = null;         // OSM-around-click fallback
+
+let reloadTimer = null;
+let lastLoadedUrl = ref("");
+
+let lastHoverId = null;
+let osmAbort = null;
+let lastOsmFetchAt = 0;
 
 const L = () => window.L;
 
+/* ---------- helpers ---------- */
 function setLoading(on, text = "טוען…") {
   loading.value = on;
   loadingText.value = text;
 }
-
 function setStatus(msg) {
   status.value = msg;
 }
-
 function sanitizeUrl(u) {
-  return String(u || "").trim().replace(/\/+$/, ""); // מוריד / בסוף (זה גורם ל-404)
+  return String(u || "").trim().replace(/\/+$/, "");
 }
-
 function isFiniteNum(v) {
   return typeof v === "number" && Number.isFinite(v);
 }
@@ -304,11 +378,23 @@ function normFC(any) {
   throw new Error("פורמט GeoJSON לא נתמך");
 }
 
+function buildingIdFromProps(p) {
+  return (
+    p?.id ??
+    p?.ID ??
+    p?.objectid ??
+    p?.OBJECTID ??
+    p?.fid ??
+    p?.FID ??
+    p?.osm_id ??
+    p?.Name ??
+    p?.name ??
+    "building"
+  );
+}
 function buildingId(f) {
   const p = f?.properties || {};
-  return (
-    p.id ?? p.ID ?? p.objectid ?? p.OBJECTID ?? p.fid ?? p.FID ?? p.Name ?? p.name ?? "building"
-  );
+  return buildingIdFromProps(p);
 }
 
 /* מיפוי שמות שדות בצורה גמישה (case-insensitive + וריאנטים נפוצים) */
@@ -322,7 +408,8 @@ function getNum(props, keys) {
     }
   }
 
-  const lower = Object.keys(props).reduce((acc, k) => (acc[k.toLowerCase()] = k, acc), {});
+  // case-insensitive fallback
+  const lower = Object.keys(props).reduce((acc, k) => ((acc[String(k).toLowerCase()] = k), acc), {});
   for (const k of keys) {
     const real = lower[String(k).toLowerCase()];
     if (real && props[real] != null) {
@@ -332,7 +419,6 @@ function getNum(props, keys) {
   }
   return null;
 }
-
 function getInt(props, keys) {
   const v = getNum(props, keys);
   if (v == null) return null;
@@ -340,8 +426,8 @@ function getInt(props, keys) {
   return Number.isFinite(n) ? n : null;
 }
 
-function deriveStatsFromProps(feature) {
-  const p = feature?.properties || {};
+function deriveStatsFromProps(featureLike) {
+  const p = featureLike?.properties || {};
 
   const velMean = getNum(p, ["Vel_mean", "vel_mean", "VEL_MEAN", "velocity_mean", "v_mean", "velMean"]);
   const cohMean = getNum(p, ["coer_mean", "Coer_mean", "COER_MEAN", "coh_mean", "coherence_mean", "cohMean"]);
@@ -374,19 +460,21 @@ function statusLabel(s) {
   return m[s] || s;
 }
 
-function getCss(varName) {
-  return getComputedStyle(document.documentElement).getPropertyValue(varName).trim();
-}
-
-function styleByStatus(statusName) {
-  const colors = {
-    subsiding: getCss("--c-subs"),
-    suspect: getCss("--c-sus"),
-    stable: getCss("--c-stable"),
-    low_quality: getCss("--c-lowq"),
-    no_data: getCss("--c-nodata"),
+/* צבעים: cache קטן כדי לא לקרוא getComputedStyle מיליון פעם */
+let cachedColors = null;
+function refreshColorsCache() {
+  const css = getComputedStyle(document.documentElement);
+  cachedColors = {
+    subsiding: css.getPropertyValue("--c-subs").trim(),
+    suspect: css.getPropertyValue("--c-sus").trim(),
+    stable: css.getPropertyValue("--c-stable").trim(),
+    low_quality: css.getPropertyValue("--c-lowq").trim(),
+    no_data: css.getPropertyValue("--c-nodata").trim(),
   };
-  const c = colors[statusName] || colors.no_data;
+}
+function styleByStatus(statusName) {
+  if (!cachedColors) refreshColorsCache();
+  const c = cachedColors[statusName] || cachedColors.no_data;
 
   return {
     weight: 2,
@@ -398,131 +486,186 @@ function styleByStatus(statusName) {
 }
 
 function shouldShowByFilter(st) {
-  if (!ui.filterSubs) return true;
-  return st.status === "subsiding" || st.status === "suspect";
-}
-
-function applyLayerStyle(layer, st) {
-  const base = styleByStatus(st.status);
-  if (ui.filterSubs) {
-    const show = shouldShowByFilter(st);
-    layer.setStyle({
-      ...base,
-      fillOpacity: show ? 0.35 : 0.0,
-      opacity: show ? 0.95 : 0.0,
-    });
-  } else {
-    layer.setStyle(base);
-  }
-}
-
-/* ---------- Tooltip positioning: right of cursor + auto-flip ---------- */
-const hoverStyle = computed(() => ({
-  left: hover.x + "px",
-  top: hover.y + "px",
-  transform: hover._flip ? `translate(${-hover._w - 14}px, -12px)` : `translate(14px, -12px)`,
-}));
-
-function onMouseMove(e) {
-  hover.x = e.clientX;
-  hover.y = e.clientY;
-  if (hover.show) requestAnimationFrame(fixTipFlip);
-}
-
-function fixTipFlip() {
-  const el = hoverRef.value;
-  if (!el) return;
-  const rect = el.getBoundingClientRect();
-  hover._w = rect.width || 260;
-  hover._flip = rect.right > window.innerWidth - 10;
-}
-
-function fmtVel(v) {
-  if (v == null || !Number.isFinite(v)) return "—";
-  return Number(v).toFixed(2);
-}
-function fmtCoh(v) {
-  if (v == null || !Number.isFinite(v)) return "—";
-  return Number(v).toFixed(2);
-}
-function fmtCount(v) {
-  if (v == null || !Number.isFinite(v)) return "—";
-  return String(v);
+  // רק שוקע/חשוד
+  return st?.status === "subsiding" || st?.status === "suspect";
 }
 
 function tipHtml(st) {
-  const velTxt = st.velMean == null ? "—" : st.velMean.toFixed(2);
-  const cohTxt = st.cohMean == null ? "—" : st.cohMean.toFixed(2);
-
-  const badgeCls = "tipBadge t-" + st.status;
   return `
-    <div class="tipRow">
-      <span class="${badgeCls}">${statusLabel(st.status)}</span>
-      <span class="tipK">Vel</span><span class="tipV">${velTxt}</span>
-      <span class="tipK">coh</span><span class="tipV">${cohTxt}</span>
-      <span class="tipK">n</span><span class="tipV">${st.count}</span>
+    <div class="tipTitle">${statusLabel(st.status)}</div>
+    <div class="tipGrid">
+      <div><span class="k">Vel_mean</span> <span class="v">${fmtVel(st.velMean)}</span> <span class="u">mm/yr</span></div>
+      <div><span class="k">coer_mean</span> <span class="v">${fmtCoh(st.cohMean)}</span></div>
+      <div><span class="k">Vel_count</span> <span class="v">${fmtCount(st.count)}</span></div>
     </div>
   `;
 }
 
-/* ---------- Selection helpers ---------- */
-const cohOk = computed(() => {
-  const st = selected.value?.st;
-  if (!st) return true;
-  if (st.cohMean == null) return true; // אם אין - לא נפסול
-  return st.cohMean >= Number(params.thrCoh);
-});
-const countOk = computed(() => {
-  const st = selected.value?.st;
-  if (!st) return true;
-  return (st.count ?? 0) >= Number(params.minPts);
-});
-const qualityTag = computed(() => {
-  const st = selected.value?.st;
-  if (!st) return "";
-  if (st.status === "no_data") return "חסר נתונים";
-  if (st.status === "low_quality") return "איכות/כמות לא מספיקה";
-  if (!cohOk.value) return "coherence נמוך";
-  if (!countOk.value) return "מעט נקודות";
-  return "איכות תקינה";
-});
-
-function clearSelection() {
-  selected.value = null;
+function fmtVel(v) {
+  return (v == null || !Number.isFinite(v)) ? "—" : Number(v).toFixed(2);
+}
+function fmtCoh(v) {
+  return (v == null || !Number.isFinite(v)) ? "—" : Number(v).toFixed(2);
+}
+function fmtCount(v) {
+  return (v == null || !Number.isFinite(v)) ? "—" : String(v);
 }
 
-/* ---------- Load & draw (AUTO) ---------- */
-async function loadBuildings() {
-  const url = sanitizeUrl(paths.buildings);
+/* ---------- UI computed ---------- */
+const cohOk = computed(() => {
+  if (!selected.value) return true;
+  const c = selected.value.st.cohMean;
+  return c == null ? true : c >= Number(params.thrCoh);
+});
+const countOk = computed(() => {
+  if (!selected.value) return true;
+  return Number(selected.value.st.count) >= Number(params.minPts);
+});
+const qualityTag = computed(() => {
+  if (!selected.value) return "";
+  if (selected.value.st.status === "low_quality") return "low_quality";
+  if (selected.value.st.status === "no_data") return "no_data";
+  return "";
+});
 
+const buildingsEffective = ref("geojson"); // geojson | tiles | osm | none
+const buildingsEffectiveLabel = computed(() => {
+  const m = {
+    geojson: "GeoJSON (קובץ)",
+    tiles: "Vector Tiles (שרת)",
+    osm: "OSM סביב קליק",
+    none: "ללא",
+  };
+  return m[buildingsEffective.value] || buildingsEffective.value;
+});
+
+/* tooltip positioning */
+function onMouseMove(ev) {
+  hover.x = ev.clientX;
+  hover.y = ev.clientY;
+}
+function fixTipFlip() {
+  const el = hoverRef.value;
+  if (!el) return;
+  hover._w = el.offsetWidth || 260;
+
+  const pad = 12;
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+
+  const right = hover.x + hover._w + pad;
+  hover._flip = right > vw;
+
+  // prevent vertical overflow (simple)
+  if (hover.y + 140 > vh) hover.y = Math.max(pad, vh - 140);
+}
+const tipStyle = computed(() => {
+  const pad = 14;
+  const x = hover._flip ? (hover.x - hover._w - pad) : (hover.x + pad);
+  const y = hover.y + pad;
+  return { transform: `translate(${x}px, ${y}px)` };
+});
+
+/* ---------- base layers ---------- */
+function applyBaseLayer() {
+  if (!map) return;
+
+  if (baseLayer) { try { map.removeLayer(baseLayer); } catch {} baseLayer = null; }
+  if (labelsLayer) { try { map.removeLayer(labelsLayer); } catch {} labelsLayer = null; }
+
+  if (ui.baseMap === "osm") {
+    baseLayer = L().tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 19,
+      attribution: "&copy; OpenStreetMap contributors",
+    }).addTo(map);
+  } else {
+    baseLayer = L().tileLayer(
+      "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+      { maxZoom: 20, attribution: "Tiles © Esri" }
+    ).addTo(map);
+
+    labelsLayer = L().tileLayer(
+      "https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
+      { maxZoom: 20, opacity: 0.9, attribution: "Labels © Esri" }
+    ).addTo(map);
+  }
+}
+
+/* ---------- tiles status ---------- */
+async function checkTilesStatus() {
+  tilesChecking.value = true;
+  tilesMsg.value = "";
+  try {
+    const base = sanitizeUrl(paths.tilesBase);
+    if (!base) throw new Error("חסר tilesBase");
+
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 5000);
+
+    const res = await fetch(`${base}/status`, { cache: "no-store", signal: ctrl.signal });
+    clearTimeout(t);
+
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const j = await res.json();
+
+    tilesReady.value = !!j.ready;
+    tilesMsg.value = tilesReady.value
+      ? "שרת ה-tiles מוכן."
+      : "השרת עלה אבל עדיין אין נתונים (ready=false).";
+  } catch (e) {
+    tilesReady.value = false;
+    tilesMsg.value = "לא מצליח להגיע לשרת ה-tiles כרגע.";
+  } finally {
+    tilesChecking.value = false;
+  }
+}
+
+/* ---------- buildings layer: remove ---------- */
+function clearBuildingsLayers() {
+  // remove main buildings layer
+  if (buildingsLayer) { try { map.removeLayer(buildingsLayer); } catch {} buildingsLayer = null; }
+  // remove OSM layer
+  if (osmLayer) { try { map.removeLayer(osmLayer); } catch {} osmLayer = null; }
+  // reset hover highlight for vectorgrid
+  lastHoverId = null;
+  hover.show = false;
+}
+
+/* ---------- GeoJSON load & draw ---------- */
+async function loadBuildings({ drawIfActive = true } = {}) {
   try {
     setLoading(true, "טוען GeoJSON…");
-    setStatus("טוען שכבה אוטומטית…");
-    ready.value = false;
-    lastLoadedUrl.value = "";
+    setStatus("טוען קובץ…");
+
+    const url = sanitizeUrl(paths.buildings);
+    if (!url) throw new Error("נתיב GeoJSON ריק");
 
     const r = await fetch(url, { cache: "no-store" });
-    if (!r.ok) throw new Error(`לא הצלחתי לטעון: ${url} (HTTP ${r.status})`);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
 
     const js = await r.json();
     buildingsFC = normFC(js);
-
-    drawBuildings(buildingsFC);
-    ready.value = true;
+    geojsonLoaded.value = true;
     lastLoadedUrl.value = url;
+
     setStatus(`נטען: ${buildingsFC.features.length} בניינים`);
+
+    if (drawIfActive && buildingsEffective.value === "geojson") {
+      drawBuildingsGeoJson(buildingsFC);
+    }
   } catch (e) {
     console.error(e);
+    geojsonLoaded.value = false;
     setStatus("שגיאה בטעינה: " + (e?.message || e));
   } finally {
     setLoading(false);
   }
 }
 
-function drawBuildings(fc) {
+function drawBuildingsGeoJson(fc) {
   if (!map) return;
 
-  if (buildingsLayer) buildingsLayer.remove();
+  clearBuildingsLayers();
 
   buildingsLayer = L().geoJSON(fc, {
     style: (feature) => {
@@ -559,68 +702,368 @@ function drawBuildings(fc) {
     },
   }).addTo(map);
 
-  const b = buildingsLayer.getBounds();
-  hasBounds.value = b?.isValid?.() === true;
-  if (hasBounds.value) map.fitBounds(b.pad(0.08));
+  buildingsEffective.value = "geojson";
 }
 
-function recolorAll() {
-  if (!buildingsLayer) return;
-  buildingsLayer.eachLayer((layer) => {
-    const f = layer.feature;
-    if (!f) return;
-    const st = deriveStatsFromProps(f);
-    applyLayerStyle(layer, st);
+/* ---------- Vector Tiles draw ---------- */
+function drawBuildingsTiles() {
+  if (!map) return;
+
+  clearBuildingsLayers();
+
+  const base = sanitizeUrl(paths.tilesBase);
+  if (!base) {
+    tilesMsg.value = "חסר tilesBase";
+    buildingsEffective.value = "none";
+    return;
+  }
+
+  // חשוב: template תואם לשרת שלך
+  const template = `${base}/tiles/buildings/{z}/{x}/{y}.pbf`;
+
+  if (!L().vectorGrid || !L().vectorGrid.protobuf) {
+    tilesMsg.value = "VectorGrid לא נטען (ודא leaflet.vectorgrid מותקן).";
+    buildingsEffective.value = "none";
+    return;
+  }
+
+  const layer = L().vectorGrid.protobuf(template, {
+    maxNativeZoom: 16,
+    interactive: true,
+    getFeatureId: (f) => String(buildingIdFromProps(f?.properties || {})),
+    vectorTileLayerStyles: {
+      buildings: (props) => vectorStyleFromProps(props),
+      "*": (props) => vectorStyleFromProps(props),
+    },
   });
+
+  function vectorStyleFromProps(props) {
+    const st = deriveStatsFromProps({ properties: props || {} });
+    const base = styleByStatus(st.status);
+
+    // VectorGrid צריך גם flags
+    const styled = {
+      ...base,
+      fill: true,
+      stroke: true,
+      // filter only subsiding/suspect
+      ...(ui.filterSubs
+        ? (shouldShowByFilter(st)
+            ? { fillOpacity: 0.35, opacity: 0.95, weight: 2 }
+            : { fillOpacity: 0.0, opacity: 0.0, weight: 0 })
+        : {}),
+    };
+
+    return styled;
+  }
+
+  layer.on("mouseover", (e) => {
+    const props = e?.layer?.properties || {};
+    const id = String(buildingIdFromProps(props));
+    lastHoverId = id;
+
+    // highlight
+    try {
+      layer.setFeatureStyle(id, { weight: 3, fillOpacity: 0.33, opacity: 1, stroke: true, fill: true });
+    } catch {}
+
+    const st = deriveStatsFromProps({ properties: props });
+    hover.html = tipHtml(st);
+    hover.show = true;
+    requestAnimationFrame(fixTipFlip);
+  });
+
+  layer.on("mouseout", (e) => {
+    const props = e?.layer?.properties || {};
+    const id = String(buildingIdFromProps(props));
+    try { layer.resetFeatureStyle(id); } catch {}
+    hover.show = false;
+    lastHoverId = null;
+  });
+
+  layer.on("mousemove", () => {
+    if (hover.show) requestAnimationFrame(fixTipFlip);
+  });
+
+  layer.on("click", (e) => {
+    const props = e?.layer?.properties || {};
+    const st = deriveStatsFromProps({ properties: props });
+    selected.value = { id: buildingIdFromProps(props), st, props };
+  });
+
+  buildingsLayer = layer.addTo(map);
+  buildingsEffective.value = "tiles";
+}
+
+/* ---------- OSM around click (fallback) ---------- */
+const OVERPASS_URL = "https://overpass.kumi.systems/api/interpreter";
+const OSM_THROTTLE_MS = 1500;
+
+async function fetchBuildingsFromOSM(lat, lng) {
+  const now = Date.now();
+  if (now - lastOsmFetchAt < OSM_THROTTLE_MS) throw new Error("OSM_THROTTLED");
+  lastOsmFetchAt = now;
+
+  const around = 140;
+  const query = `
+[out:json][timeout:25];
+(
+  way["building"](around:${around},${lat},${lng});
+  relation["building"](around:${around},${lat},${lng});
+);
+out body;
+>;
+out skel qt;
+`.trim();
+
+  if (osmAbort) osmAbort.abort();
+  osmAbort = new AbortController();
+
+  const res = await fetch(OVERPASS_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" },
+    body: new URLSearchParams({ data: query }),
+    signal: osmAbort.signal,
+  });
+
+  if (!res.ok) throw new Error("Overpass failed: " + res.status);
+  return await res.json();
+}
+
+function osmToSimpleGeoJson(osmJson) {
+  const nodes = new Map();
+  for (const el of osmJson.elements) {
+    if (el.type === "node") nodes.set(el.id, [el.lon, el.lat]);
+  }
+
+  const features = [];
+  for (const el of osmJson.elements) {
+    if (el.type !== "way") continue;
+    if (!el.tags || !el.tags.building) continue;
+
+    const coords = [];
+    for (const nid of el.nodes || []) {
+      const c = nodes.get(nid);
+      if (c) coords.push(c);
+    }
+    if (coords.length < 4) continue;
+
+    const first = coords[0];
+    const last = coords[coords.length - 1];
+    if (first[0] !== last[0] || first[1] !== last[1]) coords.push(first);
+
+    features.push({
+      type: "Feature",
+      properties: { ...el.tags, osm_id: el.id },
+      geometry: { type: "Polygon", coordinates: [coords] },
+    });
+  }
+
+  return { type: "FeatureCollection", features };
+}
+
+async function updateOsmBuildingsAt(lat, lng) {
+  try {
+    setLoading(true, "טוען OSM סביב קליק…");
+    const osm = await fetchBuildingsFromOSM(lat, lng);
+    const gj = osmToSimpleGeoJson(osm);
+
+    if (osmLayer) { try { map.removeLayer(osmLayer); } catch {} osmLayer = null; }
+
+    osmLayer = L().geoJSON(gj, {
+      style: (feature) => {
+        const st = deriveStatsFromProps(feature); // לרוב no_data כי אין Vel_mean
+        const base = styleByStatus(st.status);
+        return { ...base, weight: 1, fillOpacity: 0.2 };
+      },
+      onEachFeature: (feature, layer) => {
+        layer.on("mouseover", () => {
+          const st = deriveStatsFromProps(feature);
+          hover.html = tipHtml(st);
+          hover.show = true;
+          requestAnimationFrame(fixTipFlip);
+        });
+        layer.on("mouseout", () => (hover.show = false));
+        layer.on("click", () => {
+          const st = deriveStatsFromProps(feature);
+          selected.value = { id: buildingId(feature), st, feature };
+        });
+      },
+    }).addTo(map);
+
+    buildingsEffective.value = "osm";
+    setStatus(`OSM: ${gj.features.length} בניינים סביב קליק`);
+  } catch (e) {
+    if (e?.name === "AbortError") return;
+    if (String(e?.message || e) === "OSM_THROTTLED") {
+      setStatus("OSM: יותר מדי בקשות. נסה שוב עוד רגע.");
+      return;
+    }
+    console.error(e);
+    setStatus("שגיאה מול OSM/Overpass.");
+  } finally {
+    setLoading(false);
+  }
+}
+
+/* ---------- apply source (auto/tiles/geojson/osm/none) ---------- */
+async function applyBuildingsSource(verifyTilesNow = false) {
+  if (!map) return;
+
+  refreshColorsCache(); // כדי ש-style functions יהיו מהירים
+
+  let mode = ui.buildingsMode;
+
+  if (mode === "auto") {
+    if (verifyTilesNow || tilesMsg.value === "") await checkTilesStatus();
+    mode = tilesReady.value ? "tiles" : "geojson";
+  }
+
+  if (mode === "none") {
+    clearBuildingsLayers();
+    buildingsEffective.value = "none";
+    setStatus("ללא שכבת בניינים");
+    return;
+  }
+
+  if (mode === "tiles") {
+    if (verifyTilesNow) await checkTilesStatus();
+    if (!tilesReady.value) {
+      // fallback
+      tilesMsg.value = "Tiles לא מוכנים → מעבר ל-GeoJSON.";
+      mode = "geojson";
+      ui.buildingsMode = "auto";
+    } else {
+      drawBuildingsTiles();
+      setStatus("בניינים: Vector Tiles");
+      return;
+    }
+  }
+
+  if (mode === "geojson") {
+    // אם אין cache – נטען, אחרת נצייר
+    if (!buildingsFC) await loadBuildings({ drawIfActive: true });
+    else drawBuildingsGeoJson(buildingsFC);
+    setStatus("בניינים: GeoJSON");
+    return;
+  }
+
+  if (mode === "osm") {
+    // לא מציירים עד קליק
+    clearBuildingsLayers();
+    buildingsEffective.value = "osm";
+    setStatus("OSM: לחץ על המפה כדי למשוך בניינים סביב נקודה");
+    return;
+  }
+}
+
+/* ---------- recolor / selection / fit ---------- */
+function recolorAll() {
+  refreshColorsCache();
+
+  if (!map) return;
+
+  // Tiles: הכי אמין לבנות מחדש כדי שספים/פילטר יחולו
+  if (buildingsEffective.value === "tiles") {
+    drawBuildingsTiles();
+    return;
+  }
+
+  // GeoJSON: setStyle מחדש
+  if (buildingsEffective.value === "geojson" && buildingsLayer?.setStyle) {
+    buildingsLayer.setStyle((feature) => {
+      const st = deriveStatsFromProps(feature);
+      const base = styleByStatus(st.status);
+      if (ui.filterSubs) {
+        const show = shouldShowByFilter(st);
+        return { ...base, fillOpacity: show ? 0.35 : 0.0, opacity: show ? 0.95 : 0.0 };
+      }
+      return base;
+    });
+  }
+
+  // OSM: לצבוע מחדש (אם קיים)
+  if (buildingsEffective.value === "osm" && osmLayer?.setStyle) {
+    osmLayer.setStyle((feature) => {
+      const st = deriveStatsFromProps(feature);
+      const base = styleByStatus(st.status);
+      return { ...base, weight: 1, fillOpacity: 0.2 };
+    });
+  }
+}
+
+function clearSelection() {
+  selected.value = null;
 }
 
 function fitToLayer() {
-  if (!buildingsLayer) return;
-  const b = buildingsLayer.getBounds();
-  if (b && b.isValid()) map.fitBounds(b.pad(0.08));
+  if (!map) return;
+
+  // אם שכבת GeoJSON קיימת ויש לה bounds
+  const b = buildingsLayer?.getBounds?.();
+  if (b && b.isValid && b.isValid()) {
+    map.fitBounds(b.pad(0.12));
+    return;
+  }
+
+  // אחרת: ישראל (קירוב)
+  const israelSW = [29.45, 34.2];
+  const israelNE = [33.35, 35.95];
+  map.fitBounds([israelSW, israelNE], { padding: [18, 18] });
 }
 
-/* ---------- init map + AUTO load ---------- */
+/* ---------- map init ---------- */
+function onMapClick(e) {
+  if (buildingsEffective.value !== "osm") return;
+  const { lat, lng } = e.latlng;
+  updateOsmBuildingsAt(lat, lng);
+}
+
 onMounted(async () => {
   map = L().map("map", { zoomControl: true, preferCanvas: true }).setView([32.0853, 34.7818], 16);
 
-  L().tileLayer(
-    "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-    { maxZoom: 20, attribution: "Tiles © Esri" }
-  ).addTo(map);
+  applyBaseLayer();
 
-  L().tileLayer(
-    "https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
-    { maxZoom: 20, opacity: 0.9, attribution: "Labels © Esri" }
-  ).addTo(map);
+  window.addEventListener("mousemove", onMouseMove);
 
-  window.addEventListener("mousemove", onMouseMove, { passive: true });
+  map.on("click", onMapClick);
 
-  // ✅ AUTO LOAD
-  await loadBuildings();
+  mapReady.value = true;
+
+  await checkTilesStatus();
+
+  // ברירת מחדל: auto -> tiles אם מוכן, אחרת geojson
+  await applyBuildingsSource(false);
+
+  // אם בפועל יצא GeoJSON – נטען אוטומטית
+  if (buildingsEffective.value === "geojson" && !buildingsFC) {
+    await loadBuildings({ drawIfActive: true });
+  }
 });
 
 onBeforeUnmount(() => {
+  if (osmAbort) osmAbort.abort();
   window.removeEventListener("mousemove", onMouseMove);
+  if (map) map.off("click", onMapClick);
   if (map) map.remove();
 });
 
-/* אם משנים נתיב — טען אוטומטית בלי כפתור */
-let reloadTimer = null;
+/* שינוי נתיב GeoJSON => טעינה מחדש (רק אם המצב הפעיל הוא geojson) */
 watch(
   () => paths.buildings,
   () => {
     clearTimeout(reloadTimer);
     reloadTimer = setTimeout(() => {
-      // לא נטען אם המשתמש מחק הכל
       const u = sanitizeUrl(paths.buildings);
       if (!u) return;
-      loadBuildings();
+      buildingsFC = null;
+      geojsonLoaded.value = false;
+      if (buildingsEffective.value === "geojson") loadBuildings({ drawIfActive: true });
     }, 900);
   }
 );
 
-/* שינוי ספים / פילטר => רק צביעה מחדש */
+/* שינוי ספים / פילטר */
 watch(() => ui.filterSubs, () => recolorAll());
 watch(() => [params.thrVel, params.thrCoh, params.minPts], () => recolorAll());
 </script>
@@ -649,436 +1092,306 @@ body{
 }
 
 .app{
-  display:grid;
-  grid-template-columns: 380px 1fr;
   height:100%;
+  display:grid;
+  grid-template-columns: 360px 1fr;
 }
 
 .panel{
-  background: linear-gradient(180deg, rgba(17,28,52,.96), rgba(13,18,32,.96));
-  border-left:1px solid var(--line);
-  overflow:auto;
-  box-shadow: 0 14px 40px rgba(0,0,0,.32);
+  border-left: 1px solid var(--line);
+  background: #0e172a;
+  display:flex;
+  flex-direction: column;
+  min-width: 320px;
 }
+.panel.closed{ transform: translateX(100%); position:absolute; right:0; top:0; bottom:0; z-index:2000; }
 
 .panelHeader{
+  padding: 14px 14px 10px;
   display:flex;
-  align-items:center;
-  justify-content:space-between;
-  gap:10px;
-  padding:14px 14px 10px;
-  position:sticky;
-  top:0;
-  background: rgba(15, 23, 42, .92);
-  backdrop-filter: blur(10px);
-  border-bottom:1px solid var(--line);
-  z-index: 5;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid var(--line);
 }
-
-.brand .title{ font-size:18px; font-weight:900; letter-spacing:.2px; }
-.brand .sub{ font-size:12px; color:var(--muted); margin-top:2px; }
+.brand .title{ font-weight: 800; font-size: 18px; }
+.brand .sub{ font-size: 12px; color: var(--muted); margin-top:4px; }
 
 .iconBtn{
-  border:1px solid var(--line);
-  background: rgba(255,255,255,.06);
-  color:var(--text);
-  border-radius:10px;
-  padding:8px 10px;
-  cursor:pointer;
+  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 6px 10px;
+  cursor: pointer;
 }
-.iconBtn:hover{ background: rgba(255,255,255,.10); }
 
 .tabs{
-  display:flex;
-  gap:8px;
-  padding:10px 14px 12px;
-  border-bottom:1px solid var(--line);
+  display:grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--line);
 }
 .tab{
-  border:1px solid var(--line);
-  background: rgba(255,255,255,.06);
-  color:var(--text);
-  border-radius:999px;
-  padding:8px 12px;
-  cursor:pointer;
-  font-size:13px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
 }
 .tab.on{
-  background: rgba(110,168,254,.18);
-  border-color: rgba(110,168,254,.45);
+  background: #111c35;
+  color: var(--text);
+  border-color: #33518f;
 }
 
-.tabPage{ padding:12px 14px 18px; }
+.tabPage{
+  padding: 12px 14px 16px;
+  overflow:auto;
+  flex: 1;
+}
 
 .card{
-  background: rgba(255,255,255,.04);
-  border:1px solid var(--line);
-  border-radius:16px;
-  padding:12px;
-  margin-bottom:12px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: rgba(255,255,255,0.03);
+  padding: 12px;
+  margin-bottom: 12px;
 }
-.cardTitle{
-  font-weight:900;
-  font-size:13px;
-  margin-bottom:10px;
-  color:#f4f7ff;
-}
-
-label{ display:block; font-size:12px; color:var(--muted); margin-bottom:6px; }
-input[type="text"], input[type="number"]{
-  width:100%;
-  background: rgba(0,0,0,.22);
-  border:1px solid rgba(255,255,255,.10);
-  color:var(--text);
-  border-radius:12px;
-  padding:10px 10px;
-  outline:none;
-}
-input[type="text"]:focus, input[type="number"]:focus{
-  border-color: rgba(110,168,254,.55);
-  box-shadow: 0 0 0 4px rgba(110,168,254,.12);
-}
+.cardTitle{ font-weight: 800; margin-bottom: 10px; }
 
 .row2{
   display:grid;
   grid-template-columns: 1fr 1fr;
-  gap:10px;
-  align-items:end;
+  gap: 10px;
+  align-items: end;
 }
 .colSpan2{ grid-column: 1 / -1; }
 
+label{
+  display:block;
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+
+input, select{
+  width:100%;
+  border-radius: 10px;
+  border: 1px solid rgba(255,255,255,0.12);
+  background: rgba(0,0,0,0.2);
+  color: var(--text);
+  padding: 10px;
+  outline: none;
+}
+
+.hint{
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.35;
+}
+.hint code{
+  background: rgba(0,0,0,0.25);
+  padding: 2px 6px;
+  border-radius: 8px;
+}
+.mini{ font-size: 11px; }
+
 .rowBtns{
   display:flex;
-  gap:10px;
-  margin-top:10px;
+  gap: 8px;
+  margin-top: 10px;
 }
 .btn{
-  border:none;
-  background: linear-gradient(180deg, rgba(110,168,254,.95), rgba(110,168,254,.78));
-  color:#061024;
-  font-weight:900;
-  border-radius:12px;
-  padding:10px 12px;
-  cursor:pointer;
-  flex:1;
-}
-.btn:hover{ filter: brightness(1.05); }
-.btn:disabled{ opacity:.55; cursor:not-allowed; }
-.btn.ghost{
-  background: rgba(255,255,255,.06);
+  border-radius: 10px;
+  border: 1px solid rgba(255,255,255,0.14);
+  background: #1a2b55;
   color: var(--text);
-  border:1px solid var(--line);
+  padding: 9px 10px;
+  cursor: pointer;
 }
-.btn.ghost:hover{ background: rgba(255,255,255,.10); }
-
-.hint{ color:var(--muted); font-size:12px; margin-top:8px; line-height:1.35; }
-.hint.mini{ margin-top:6px; font-size:11px; }
-code{ background: rgba(0,0,0,.25); padding:2px 6px; border-radius:8px; }
+.btn.ghost{
+  background: transparent;
+}
 
 .check{
   display:flex;
+  gap: 8px;
   align-items:center;
-  gap:10px;
-  padding:10px 10px;
-  border:1px solid rgba(255,255,255,.08);
-  border-radius:12px;
-  background: rgba(0,0,0,.14);
-  cursor:pointer;
-  user-select:none;
+  font-size: 13px;
+  color: var(--text);
 }
-.check input{ transform: scale(1.1); }
-
-/* ------------ Improved info UI ------------ */
-.emptyState{
-  display:flex;
-  gap:12px;
-  align-items:center;
-  padding:12px;
-  border-radius:14px;
-  background: rgba(0,0,0,.18);
-  border:1px dashed rgba(255,255,255,.12);
-}
-.emptyIcon{
-  width:36px; height:36px;
-  display:grid; place-items:center;
-  border-radius:12px;
-  background: rgba(255,255,255,.06);
-  border:1px solid rgba(255,255,255,.10);
-  font-weight:900;
-}
-.emptyText{ color: var(--muted); font-size:12px; line-height:1.45; }
-
-.infoCard{
-  border-radius:16px;
-  background: rgba(0,0,0,.18);
-  border:1px solid rgba(255,255,255,.10);
-  padding:12px;
-}
-.infoTop{
-  display:flex;
-  justify-content:space-between;
-  gap:10px;
-  align-items:flex-start;
-  margin-bottom:10px;
-}
-.idBlock .idLabel{
-  font-size:11px;
-  color: var(--muted);
-}
-.idBlock .idValue{
-  font-size:15px;
-  font-weight:900;
-  letter-spacing:.2px;
-}
-
-.badges{
-  display:flex;
-  gap:8px;
-  flex-wrap:wrap;
-  justify-content:flex-end;
-}
-.badge{
-  display:inline-flex;
-  align-items:center;
-  gap:6px;
-  padding:6px 10px;
-  border-radius:999px;
-  font-size:12px;
-  font-weight:900;
-  border:1px solid rgba(255,255,255,.10);
-  background: rgba(255,255,255,.06);
-}
-.badge.ghost{
-  background: rgba(0,0,0,.20);
-  color: var(--muted);
-}
-.b-subsiding{ background: rgba(226,75,75,.18); border-color: rgba(226,75,75,.35); }
-.b-suspect{ background: rgba(240,138,36,.18); border-color: rgba(240,138,36,.35); }
-.b-stable{ background: rgba(47,111,228,.18); border-color: rgba(47,111,228,.35); }
-.b-low_quality{ background: rgba(155,123,212,.18); border-color: rgba(155,123,212,.35); }
-.b-no_data{ background: rgba(147,160,184,.18); border-color: rgba(147,160,184,.35); }
-
-.kvGrid{
-  display:grid;
-  grid-template-columns: 1fr 1fr;
-  gap:10px;
-}
-.kv{
-  background: rgba(255,255,255,.06);
-  border:1px solid rgba(255,255,255,.10);
-  border-radius:14px;
-  padding:10px;
-}
-.kv .k{ font-size:11px; color: var(--muted); }
-.kv .v{ font-size:16px; font-weight:900; margin-top:4px; }
-.kv .u{ font-size:11px; color: var(--muted); margin-top:2px; }
-
-.meterWrap{
-  margin-top:12px;
-  padding:10px;
-  border-radius:14px;
-  background: rgba(255,255,255,.06);
-  border:1px solid rgba(255,255,255,.10);
-}
-.meterTop{
-  display:flex;
-  justify-content:space-between;
-  align-items:baseline;
-  gap:10px;
-  margin-bottom:8px;
-}
-.meterLabel{ font-size:12px; color: var(--muted); }
-.meterValue{ font-weight:900; }
-.meterValue.bad{ color: #ffd1d1; }
-.miniNote{ font-size:11px; color: var(--muted); font-weight:700; margin-right:6px; }
-
-.meter{
-  position:relative;
-  height:10px;
-  border-radius:999px;
-  background: rgba(0,0,0,.25);
-  border:1px solid rgba(255,255,255,.10);
-  overflow:hidden;
-}
-.meterFill{
-  height:100%;
-  background: rgba(110,168,254,.55);
-}
-.meterThr{
-  position:absolute;
-  top:-3px;
-  width:2px;
-  height:16px;
-  background: rgba(255,255,255,.70);
-  box-shadow: 0 0 0 2px rgba(0,0,0,.25);
-}
-
-.checks{
-  margin-top:10px;
-  display:flex;
-  flex-direction:column;
-  gap:8px;
-}
-.checkRow{
-  display:flex;
-  align-items:center;
-  gap:10px;
-  padding:8px 10px;
-  border-radius:12px;
-  border:1px solid rgba(255,255,255,.10);
-  background: rgba(0,0,0,.12);
-  font-size:12px;
-  color: var(--muted);
-}
-.checkRow .dot{
-  width:8px; height:8px;
-  border-radius:999px;
-  background: rgba(147,160,184,.9);
-}
-.checkRow.ok{ color:#e8eefc; border-color: rgba(110,168,254,.25); }
-.checkRow.ok .dot{ background: rgba(110,168,254,.95); }
-.checkRow.bad{ color:#ffe6e6; border-color: rgba(226,75,75,.25); }
-.checkRow.bad .dot{ background: rgba(226,75,75,.95); }
-
-.miniExplain{
-  margin-top:10px;
-  color: var(--muted);
-  font-size:11px;
-  line-height:1.35;
-}
-.miniTag{
-  display:inline-block;
-  padding:2px 8px;
-  border-radius:999px;
-  border:1px solid rgba(255,255,255,.10);
-  background: rgba(255,255,255,.06);
-  font-weight:900;
-  margin-left:6px;
-}
+.check input{ width:auto; }
 
 .statusBox{
-  padding:10px;
-  border-radius:14px;
-  background: rgba(0,0,0,.18);
-  border:1px solid rgba(255,255,255,.10);
-  font-size:12px;
-  line-height:1.45;
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 12px;
+  padding: 10px;
+  background: rgba(0,0,0,0.18);
 }
 .statusLine{
   display:flex;
+  gap: 10px;
   align-items:center;
-  gap:10px;
 }
 .statusDot{
-  width:10px; height:10px;
-  border-radius:999px;
-  background: rgba(147,160,184,.7);
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: #667;
 }
-.statusDot.on{
-  background: rgba(110,168,254,.95);
-}
+.statusDot.on{ background: #2ecc71; }
 
-/* legend */
-.legend{ display:flex; flex-direction:column; gap:10px; }
-.legRow{ display:flex; align-items:center; gap:10px; font-size:13px; color:#eaf1ff; }
-.sw{ width:16px; height:16px; border-radius:6px; border:1px solid rgba(255,255,255,.18); }
+.legend .legRow{ display:flex; align-items:center; gap: 10px; margin: 8px 0; }
+.sw{ width: 18px; height: 12px; border-radius: 6px; display:inline-block; }
 .s-subs{ background: var(--c-subs); }
 .s-sus{ background: var(--c-sus); }
 .s-stable{ background: var(--c-stable); }
 .s-lowq{ background: var(--c-lowq); }
 .s-nodata{ background: var(--c-nodata); }
 
-.p{ color:#d9e6ff; font-size:13px; line-height:1.55; }
-.ul{ margin:8px 0 0 0; padding-right:18px; color:#d9e6ff; }
-
-/* map */
-.mapWrap{ position:relative; }
-#map{ width:100%; height:100%; }
-
-.topRight{
-  position:absolute;
-  top:12px;
-  left:12px;
-  z-index: 500;
-}
-.pill{
-  background: rgba(15, 23, 42, .85);
-  border:1px solid rgba(255,255,255,.10);
-  border-radius:999px;
-  padding:8px 12px;
-  font-size:12px;
+.emptyState{
+  display:grid;
+  place-items:center;
+  gap: 10px;
+  padding: 16px 8px;
+  text-align:center;
   color: var(--muted);
-  backdrop-filter: blur(10px);
+}
+.emptyIcon{ font-size: 24px; }
+.emptyText{ font-size: 13px; line-height: 1.4; }
+
+.infoCard{ display:grid; gap: 10px; }
+.infoTop{ display:flex; justify-content: space-between; align-items:flex-start; gap: 10px; }
+.idBlock .idLabel{ font-size: 12px; color: var(--muted); }
+.idBlock .idValue{ font-weight: 900; font-size: 16px; }
+
+.badges{ display:flex; gap: 8px; flex-wrap: wrap; justify-content:flex-end; }
+.badge{
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-size: 12px;
+  border: 1px solid rgba(255,255,255,0.14);
+}
+.badge.ghost{ background: transparent; color: var(--muted); }
+
+.b-subsiding{ background: rgba(226,75,75,0.18); border-color: rgba(226,75,75,0.35); }
+.b-suspect{ background: rgba(240,138,36,0.18); border-color: rgba(240,138,36,0.35); }
+.b-stable{ background: rgba(47,111,228,0.18); border-color: rgba(47,111,228,0.35); }
+.b-low_quality{ background: rgba(155,123,212,0.18); border-color: rgba(155,123,212,0.35); }
+.b-no_data{ background: rgba(147,160,184,0.18); border-color: rgba(147,160,184,0.35); }
+
+.kvGrid{
+  display:grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.kv{
+  border: 1px solid rgba(255,255,255,0.10);
+  border-radius: 12px;
+  padding: 10px;
+  background: rgba(0,0,0,0.12);
+}
+.kv .k{ font-size: 11px; color: var(--muted); }
+.kv .v{ font-size: 16px; font-weight: 900; margin-top: 4px; }
+.kv .u{ font-size: 11px; color: var(--muted); margin-top: 2px; }
+
+.meterWrap{ margin-top: 6px; }
+.meterTop{ display:flex; justify-content: space-between; align-items:center; }
+.meterLabel{ font-size: 12px; color: var(--muted); }
+.meterValue{ font-size: 12px; }
+.meterValue.bad{ color: #ffbf70; }
+.miniNote{ color: var(--muted); margin-right: 6px; font-size: 11px; }
+.meter{
+  margin-top: 8px;
+  height: 10px;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.08);
+  position: relative;
+  overflow:hidden;
+}
+.meterFill{
+  height: 100%;
+  background: rgba(46,204,113,0.65);
+}
+.meterThr{
+  position:absolute;
+  top: -2px;
+  width: 2px;
+  height: 14px;
+  background: rgba(240,138,36,0.9);
 }
 
-/* Tooltip */
-.hoverTip{
-  position: fixed;
-  z-index: 2000;
-  pointer-events: none;
-  background: rgba(10, 14, 24, .92);
-  border: 1px solid rgba(255,255,255,.12);
+.checks{ display:grid; gap: 8px; margin-top: 8px; }
+.checkRow{
+  display:flex; align-items:center; gap: 10px;
+  border: 1px solid rgba(255,255,255,0.10);
   border-radius: 12px;
   padding: 8px 10px;
+  background: rgba(0,0,0,0.12);
   font-size: 12px;
-  color: #eef4ff;
-  box-shadow: 0 12px 30px rgba(0,0,0,.35);
-  white-space: nowrap;
+  color: var(--muted);
 }
-.tipRow{
-  display:flex;
-  align-items:center;
-  gap:10px;
+.checkRow .dot{
+  width: 9px; height: 9px; border-radius: 999px;
+  background: #667;
 }
-.tipK{ color: rgba(255,255,255,.70); font-weight:800; font-size:11px; }
-.tipV{ color:#eef4ff; font-weight:900; }
-.tipBadge{
-  padding:4px 10px;
-  border-radius:999px;
-  border:1px solid rgba(255,255,255,.10);
-  font-weight:900;
-  font-size:11px;
-  margin-left:4px;
-}
-.t-subsiding{ background: rgba(226,75,75,.18); border-color: rgba(226,75,75,.35); }
-.t-suspect{ background: rgba(240,138,36,.18); border-color: rgba(240,138,36,.35); }
-.t-stable{ background: rgba(47,111,228,.18); border-color: rgba(47,111,228,.35); }
-.t-low_quality{ background: rgba(155,123,212,.18); border-color: rgba(155,123,212,.35); }
-.t-no_data{ background: rgba(147,160,184,.18); border-color: rgba(147,160,184,.35); }
+.checkRow.ok .dot{ background: #2ecc71; }
+.checkRow.bad .dot{ background: #f08a24; }
 
-/* Loader */
-.loader{
+.miniExplain{
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.4;
+}
+.miniTag{
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  background: rgba(0,0,0,0.25);
+  padding: 1px 6px;
+  border-radius: 8px;
+}
+
+.main{
+  position: relative;
+  overflow:hidden;
+}
+#map{ height: 100%; width: 100%; }
+
+.tip{
+  position: fixed;
+  z-index: 1500;
+  pointer-events: none;
+  width: 260px;
+  background: rgba(15,22,39,0.92);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 14px;
+  padding: 10px 10px;
+  box-shadow: 0 14px 40px rgba(0,0,0,0.35);
+}
+.tipTitle{ font-weight: 900; margin-bottom: 8px; }
+.tipGrid{ display:grid; gap: 6px; font-size: 12px; color: var(--muted); }
+.tipGrid .k{ color: var(--muted); }
+.tipGrid .v{ color: var(--text); font-weight: 800; }
+.tipGrid .u{ color: var(--muted); margin-right: 4px; }
+
+.loadingOverlay{
   position:absolute;
   inset:0;
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  flex-direction:column;
-  gap:10px;
-  background: rgba(0,0,0,.35);
-  z-index: 1200;
+  display:grid;
+  place-items:center;
+  gap: 10px;
+  background: rgba(0,0,0,0.35);
+  z-index: 1400;
 }
-.spin{
-  width:34px; height:34px;
-  border-radius:50%;
-  border: 4px solid rgba(255,255,255,.18);
-  border-top-color: rgba(255,255,255,.75);
-  animation: spin 1s linear infinite;
+.spinner{
+  width: 28px; height: 28px;
+  border-radius: 999px;
+  border: 3px solid rgba(255,255,255,0.18);
+  border-top-color: rgba(255,255,255,0.9);
+  animation: spin 0.9s linear infinite;
 }
 @keyframes spin { to { transform: rotate(360deg); } }
-.loader .txt{ color:#eaf1ff; font-weight:900; }
-
-/* responsive panel */
-@media (max-width: 980px){
-  .app{ grid-template-columns: 1fr; }
-  .panel{
-    position:absolute;
-    right:0; top:0; bottom:0;
-    width:min(420px, 92vw);
-    transform: translateX(0);
-    transition: transform .2s ease;
-    z-index: 1000;
-  }
-  .panel.closed{ transform: translateX(105%); }
-}
+.loadingText{ color: var(--text); font-weight: 700; }
 </style>
