@@ -20,5 +20,11 @@
   },
   "tools": {
     "pmtiles_cli": "pmtiles"
+  },
+  "mbtiles": {
+    "path": "pipeline/data/buildings_il.mbtiles",
+    "out_pmtiles": "pipeline/exports/buildings_il.pmtiles"
   }
+
+  
 }
