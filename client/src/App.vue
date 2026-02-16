@@ -4,98 +4,145 @@
       <div class="panelTop">
         <div>
           <div class="appTitle">SatMap</div>
-          <div class="appSub">Buildings Joined (GeoJSON)</div>
+          <div class="appSub">Buildings Joined (GeoJSON) · חיפוש/סינון + מפה</div>
         </div>
         <button class="iconBtn" @click="panelOpen = !panelOpen" title="פתח/סגור">☰</button>
       </div>
 
-      <div class="box">
-        <div class="row">
-          <label>חיפוש OBJECTID</label>
-          <input v-model.trim="q" placeholder="לדוגמה: 188" />
-        </div>
+      <div class="tabs">
+        <button class="tab" :class="{ on: tab === 'buildings' }" @click="tab = 'buildings'">בניינים</button>
+        <button class="tab" :class="{ on: tab === 'list' }" @click="tab = 'list'">רשימה</button>
+        <button class="tab" :class="{ on: tab === 'about' }" @click="tab = 'about'">איך זה עובד</button>
+      </div>
 
-        <div class="row2">
-          <div>
-            <label>סינון סטטוס</label>
-            <select v-model="statusFilter">
-              <option value="">הכל</option>
-              <option value="stable">stable</option>
-              <option value="no_data">no_data</option>
-              <option value="suspect">suspect</option>
-            </select>
+      <!-- ============== BUILDINGS TAB ============== -->
+      <section v-if="tab === 'buildings'">
+        <div class="box">
+          <div class="row">
+            <label>חיפוש OBJECTID</label>
+            <input v-model.trim="q" placeholder="לדוגמה: 188" />
           </div>
 
-          <div>
-            <label>סף שקיעה (Vel_mean ≤)</label>
-            <input type="number" v-model.number="velThreshold" step="0.5" />
-            <div class="hint">לפרוטוטייפ: תנסה -2 או -5</div>
+          <div class="row2">
+            <div>
+              <label>סינון סטטוס</label>
+              <select v-model="statusFilter">
+                <option value="">הכל</option>
+                <option value="stable">stable</option>
+                <option value="no_data">no_data</option>
+                <option value="suspect">suspect</option>
+              </select>
+            </div>
+
+            <div>
+              <label>סף שקיעה (Vel_mean ≤)</label>
+              <input type="number" v-model.number="velThreshold" step="0.5" />
+              <div class="hint">לפרוטוטייפ: תנסה ‎-2 או ‎-5</div>
+            </div>
+          </div>
+
+          <div class="row2">
+            <button class="btn" @click="fitAll" :disabled="!mapReady || !geojson">התמקד על כל הבניינים</button>
+            <button class="btn ghost" @click="reload">טען מחדש</button>
+          </div>
+
+          <div class="stats" v-if="geojson">
+            <div>סה״כ: <b>{{ totalCount }}</b></div>
+            <div>stable: <b>{{ counts.stable }}</b></div>
+            <div>no_data: <b>{{ counts.no_data }}</b></div>
+            <div>suspect: <b>{{ counts.suspect }}</b></div>
           </div>
         </div>
 
-        <div class="row2">
-          <button class="btn" @click="fitAll" :disabled="!mapReady || !geojson">התמקד על כל הבניינים</button>
-          <button class="btn ghost" @click="reload">טען מחדש</button>
+        <div class="box" v-if="selected">
+          <div class="title2">פרטי בניין נבחר</div>
+          <div class="kv"><span>OBJECTID</span><b>{{ selected.OBJECTID ?? "—" }}</b></div>
+          <div class="kv"><span>status</span><b>{{ selected.status ?? "—" }}</b></div>
+          <div class="kv"><span>Vel_mean</span><b>{{ fmtNum(selected.Vel_mean) }}</b></div>
+          <div class="kv"><span>Vel_count</span><b>{{ selected.Vel_count ?? "—" }}</b></div>
+          <div class="kv"><span>coer_mean</span><b>{{ fmtNum(selected.coer_mean) }}</b></div>
+
+          <div class="row2">
+            <button class="btn" @click="zoomToSelected" :disabled="!mapReady">זום לבניין</button>
+            <button class="btn ghost" @click="selected = null">נקה בחירה</button>
+          </div>
         </div>
 
-        <div class="stats" v-if="geojson">
-          <div>סה״כ: <b>{{ totalCount }}</b></div>
-          <div>stable: <b>{{ counts.stable }}</b></div>
-          <div>no_data: <b>{{ counts.no_data }}</b></div>
-          <div>suspect: <b>{{ counts.suspect }}</b></div>
+        <div class="box error" v-if="error">
+          {{ error }}
         </div>
-      </div>
+      </section>
 
-      <div class="box" v-if="selected">
-        <div class="title2">פרטי בניין נבחר</div>
-        <div class="kv"><span>OBJECTID</span><b>{{ selected.OBJECTID ?? "—" }}</b></div>
-        <div class="kv"><span>status</span><b>{{ selected.status ?? "—" }}</b></div>
-        <div class="kv"><span>Vel_mean</span><b>{{ fmtNum(selected.Vel_mean) }}</b></div>
-        <div class="kv"><span>Vel_count</span><b>{{ selected.Vel_count ?? "—" }}</b></div>
-        <div class="kv"><span>coer_mean</span><b>{{ fmtNum(selected.coer_mean) }}</b></div>
+      <!-- ============== LIST TAB ============== -->
+      <section v-else-if="tab === 'list'">
+        <div class="box">
+          <div class="title2">רשימה ({{ filtered.length }})</div>
 
-        <div class="row2">
-          <button class="btn" @click="zoomToSelected" :disabled="!mapReady">זום לבניין</button>
-          <button class="btn ghost" @click="selected = null">נקה בחירה</button>
+          <div class="list">
+            <button
+              v-for="item in filtered.slice(0, 250)"
+              :key="item._key"
+              class="listItem"
+              :class="{ on: selected && idEq(selected.OBJECTID, item.OBJECTID) }"
+              @click="selectByObjectId(item.OBJECTID)"
+              :title="`Vel_mean=${fmtNum(item.Vel_mean)} | status=${item.status}`"
+            >
+              <div class="liTop">
+                <b>#{{ item.OBJECTID ?? "?" }}</b>
+                <span class="badge" :class="badgeClass(item)">{{ item.status || "—" }}</span>
+              </div>
+              <div class="liSub">
+                Vel_mean: <b>{{ fmtNum(item.Vel_mean) }}</b> · Vel_count: <b>{{ item.Vel_count ?? "—" }}</b>
+              </div>
+            </button>
+          </div>
+
+          <div class="hint" v-if="filtered.length > 250">
+            מוצגים 250 ראשונים כדי לא להכביד על הדפדפן.
+          </div>
         </div>
-      </div>
 
-      <div class="box">
-        <div class="title2">רשימה ({{ filtered.length }})</div>
-        <div class="list">
-          <button
-            v-for="item in filtered.slice(0, 250)"
-            :key="item._key"
-            class="listItem"
-            :class="{ on: selected && selected.OBJECTID === item.OBJECTID }"
-            @click="selectByObjectId(item.OBJECTID)"
-            :title="`Vel_mean=${fmtNum(item.Vel_mean)} | status=${item.status}`"
-          >
-            <div class="liTop">
-              <b>#{{ item.OBJECTID ?? "?" }}</b>
-              <span class="badge" :class="badgeClass(item)">{{ item.status || "—" }}</span>
-            </div>
-            <div class="liSub">
-              Vel_mean: <b>{{ fmtNum(item.Vel_mean) }}</b> · Vel_count: <b>{{ item.Vel_count ?? "—" }}</b>
-            </div>
-          </button>
+        <div class="box error" v-if="error">
+          {{ error }}
         </div>
-        <div class="hint" v-if="filtered.length > 250">
-          מוצגים 250 ראשונים (כדי לא להכביד על הדפדפן).
-        </div>
-      </div>
+      </section>
 
-      <div class="box error" v-if="error">
-        {{ error }}
-      </div>
+      <!-- ============== ABOUT TAB ============== -->
+      <section v-else class="box">
+        <div class="title2">איך זה עובד (בפרוטוטייפ)</div>
+        <div class="p">
+          הקובץ <b>buildings_joined.geojson</b> מכיל פוליגונים של בניינים + מאפיינים:
+        </div>
+        <ul class="ul">
+          <li><b>Vel_mean</b> — קצב (לרוב mm/yr) של תזוזה לאורך קו הראייה/מודל שלך.</li>
+          <li><b>Vel_count</b> — כמה תצפיות/חיבורים נכנסו לחישוב.</li>
+          <li><b>coer_mean</b> — איכות/קוהרנטיות ממוצעת (גבוה = אמין יותר).</li>
+          <li><b>status</b> — stable / suspect / no_data (לפי החישוב שלך).</li>
+        </ul>
+        <div class="p">
+          צביעה על המפה:
+          <b class="chip cRed">אדום</b> Vel_mean ≤ -5,
+          <b class="chip cOrange">כתום</b> Vel_mean ≤ -2,
+          <b class="chip cGreen">ירוק</b> אחרת,
+          <b class="chip cGrey">אפור</b> no_data.
+        </div>
+        <div class="hint">
+          אם הקובץ גדול מאוד – עדיף להוציא “טבלת נתונים” קטנה (JSON/CSV) בצד שרת ולהציג רק אותה.
+        </div>
+      </section>
     </aside>
 
     <main class="mapWrap">
       <div ref="mapEl" class="map"></div>
 
-      <div class="loading" v-if="loading">
-        טוען GeoJSON…
+      <div class="legend" v-if="mapReady">
+        <div class="lgRow"><span class="dot red"></span> ≤ -5</div>
+        <div class="lgRow"><span class="dot orange"></span> ≤ -2</div>
+        <div class="lgRow"><span class="dot green"></span> stable/אחר</div>
+        <div class="lgRow"><span class="dot grey"></span> no_data</div>
       </div>
+
+      <div class="loading" v-if="loading">טוען GeoJSON…</div>
     </main>
   </div>
 </template>
@@ -114,12 +161,15 @@ const loading = ref(false);
 const error = ref("");
 
 const panelOpen = ref(true);
+const tab = ref("buildings"); // buildings | list | about
 const selected = ref(null);
 
 const q = ref("");
 const statusFilter = ref("");
 const velThreshold = ref(-2);
 
+// הקובץ צריך להיות כאן:
+// client/public/data/buildings_joined.geojson
 const GEOJSON_URL = computed(() => {
   const base = import.meta.env.BASE_URL || "/";
   return `${base}data/buildings_joined.geojson`;
@@ -131,10 +181,17 @@ function fmtNum(v) {
   return n.toFixed(3);
 }
 
-function normProps(f) {
+function idEq(a, b) {
+  const na = Number(a);
+  const nb = Number(b);
+  if (Number.isFinite(na) && Number.isFinite(nb)) return na === nb;
+  return String(a ?? "") === String(b ?? "");
+}
+
+function normProps(f, idx) {
   const p = f?.properties || {};
   return {
-    _key: p.OBJECTID ?? Math.random().toString(36).slice(2),
+    _key: p.OBJECTID ?? `idx_${idx}`,
     OBJECTID: p.OBJECTID,
     coer_mean: p.coer_mean,
     Vel_count: p.Vel_count,
@@ -143,8 +200,7 @@ function normProps(f) {
   };
 }
 
-const allItems = computed(() => (geojson.value?.features || []).map(normProps));
-
+const allItems = computed(() => (geojson.value?.features || []).map((f, i) => normProps(f, i)));
 const totalCount = computed(() => allItems.value.length);
 
 const counts = computed(() => {
@@ -170,18 +226,15 @@ const filtered = computed(() => {
     arr = arr.filter((it) => it.status === statusFilter.value);
   }
 
-  // “חשוד לשקיעה” לפי Vel_mean
   const thr = Number(velThreshold.value);
   if (Number.isFinite(thr)) {
     arr = arr.filter((it) => {
       const v = Number(it.Vel_mean);
-      // אם אין נתון, לא מסננים אותו החוצה בכוח (תוכל לשנות אם בא לך)
-      if (!Number.isFinite(v)) return true;
-      return v <= thr || it.status === "no_data" || it.status === "stable";
+      if (!Number.isFinite(v)) return true; // no_data נשאר ברשימה
+      return v <= thr;
     });
   }
 
-  // ממיין: קודם מי שיש לו Vel_mean “חזק” (בערך מוחלט)
   return [...arr].sort((a, b) => Math.abs(Number(b.Vel_mean) || 0) - Math.abs(Number(a.Vel_mean) || 0));
 });
 
@@ -229,6 +282,7 @@ function initMap() {
     const f = e?.features?.[0];
     if (!f) return;
     selected.value = f.properties || null;
+    tab.value = "buildings";
   });
 
   map.value.on("mouseenter", "buildings-fill", () => {
@@ -241,17 +295,14 @@ function initMap() {
 
 function upsertGeojsonLayer() {
   if (!mapReady.value || !map.value || !geojson.value) return;
-
   const m = map.value;
 
-  // source
   if (m.getSource("buildings")) {
     m.getSource("buildings").setData(geojson.value);
   } else {
     m.addSource("buildings", { type: "geojson", data: geojson.value });
   }
 
-  // layers
   if (!m.getLayer("buildings-fill")) {
     m.addLayer({
       id: "buildings-fill",
@@ -262,9 +313,9 @@ function upsertGeojsonLayer() {
         "fill-color": [
           "case",
           ["==", ["get", "status"], "no_data"], "#9aa0a6",
-          ["<=", ["to-number", ["get", "Vel_mean"]], -5], "#e53935",
-          ["<=", ["to-number", ["get", "Vel_mean"]], -2], "#fb8c00",
-          "#43a047"
+          ["<=", ["coalesce", ["to-number", ["get", "Vel_mean"]], 999999], -5], "#e53935",
+          ["<=", ["coalesce", ["to-number", ["get", "Vel_mean"]], 999999], -2], "#fb8c00",
+          "#43a047",
         ],
       },
     });
@@ -273,7 +324,7 @@ function upsertGeojsonLayer() {
       id: "buildings-outline",
       type: "line",
       source: "buildings",
-      paint: { "line-width": 1, "line-opacity": 0.8 },
+      paint: { "line-width": 1, "line-opacity": 0.7 },
     });
   }
 
@@ -324,8 +375,7 @@ function fitAll() {
 
 function zoomToSelected() {
   if (!mapReady.value || !selected.value || !geojson.value) return;
-  // למצוא את הפיצ’ר המקורי כדי לקחת גיאומטריה
-  const f = (geojson.value.features || []).find((x) => x?.properties?.OBJECTID === selected.value.OBJECTID);
+  const f = (geojson.value.features || []).find((x) => idEq(x?.properties?.OBJECTID, selected.value.OBJECTID));
   if (!f) return;
   const bb = bboxFromFeature(f);
   if (!bb) return;
@@ -333,9 +383,10 @@ function zoomToSelected() {
 }
 
 function selectByObjectId(objectId) {
-  const f = (geojson.value?.features || []).find((x) => x?.properties?.OBJECTID === objectId);
+  const f = (geojson.value?.features || []).find((x) => idEq(x?.properties?.OBJECTID, objectId));
   if (!f) return;
   selected.value = f.properties || null;
+  tab.value = "buildings";
   zoomToSelected();
 }
 
@@ -373,6 +424,7 @@ onBeforeUnmount(() => {
   height: 100%;
   overflow: auto;
 }
+
 .panelTop {
   position: sticky;
   top: 0;
@@ -384,7 +436,8 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: space-between;
 }
-.appTitle { font-size: 18px; font-weight: 800; }
+
+.appTitle { font-size: 18px; font-weight: 900; }
 .appSub { font-size: 12px; opacity: 0.7; margin-top: 2px; }
 
 .iconBtn {
@@ -395,6 +448,31 @@ onBeforeUnmount(() => {
   cursor: pointer;
 }
 
+.tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid #f1f5f9;
+  background: #fff;
+  position: sticky;
+  top: 56px;
+  z-index: 4;
+}
+.tab {
+  border: 1px solid #e5e7eb;
+  background: #fff;
+  border-radius: 999px;
+  padding: 8px 10px;
+  cursor: pointer;
+  font-size: 13px;
+}
+.tab.on {
+  border-color: #111827;
+  background: #111827;
+  color: #fff;
+}
+
 .box {
   padding: 12px;
   border-bottom: 1px solid #f1f5f9;
@@ -403,13 +481,15 @@ onBeforeUnmount(() => {
 .row { display: grid; gap: 6px; margin-bottom: 10px; }
 .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 8px; }
 label { font-size: 12px; opacity: .8; }
+
 input, select {
   width: 100%;
   border: 1px solid #e5e7eb;
-  border-radius: 10px;
+  border-radius: 12px;
   padding: 10px;
   font-size: 14px;
 }
+
 .hint { font-size: 12px; opacity: .65; margin-top: 6px; }
 
 .btn {
@@ -421,19 +501,21 @@ input, select {
   cursor: pointer;
 }
 .btn:disabled { opacity: .5; cursor: not-allowed; }
+
 .btn.ghost {
   background: #fff;
   color: #111827;
   border-color: #e5e7eb;
 }
 
-.title2 { font-weight: 800; margin-bottom: 8px; }
+.title2 { font-weight: 900; margin-bottom: 8px; }
 .kv {
   display: flex;
   justify-content: space-between;
   padding: 6px 0;
   border-bottom: 1px dashed #eef2f7;
 }
+
 .stats {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -451,6 +533,7 @@ input, select {
   cursor: pointer;
 }
 .listItem.on { border-color: #111827; }
+
 .liTop { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .liSub { font-size: 12px; opacity: .75; margin-top: 4px; }
 
@@ -468,6 +551,24 @@ input, select {
 .mapWrap { position: relative; }
 .map { width: 100%; height: 100%; }
 
+.legend {
+  position: absolute;
+  left: 16px;
+  bottom: 16px;
+  background: rgba(255,255,255,.95);
+  border: 1px solid #e5e7eb;
+  border-radius: 14px;
+  padding: 10px 12px;
+  font-size: 12px;
+  box-shadow: 0 10px 20px rgba(0,0,0,.08);
+}
+.lgRow { display: flex; align-items: center; gap: 8px; margin: 4px 0; }
+.dot { width: 10px; height: 10px; border-radius: 999px; display: inline-block; }
+.dot.red { background: #e53935; }
+.dot.orange { background: #fb8c00; }
+.dot.green { background: #43a047; }
+.dot.grey { background: #9aa0a6; }
+
 .loading {
   position: absolute;
   bottom: 16px;
@@ -483,9 +584,26 @@ input, select {
   color: #b91c1c;
   background: #fff5f5;
 }
+
+.p { font-size: 13px; line-height: 1.6; margin: 8px 0; }
+.ul { margin: 8px 0; padding-right: 18px; font-size: 13px; line-height: 1.6; }
+.chip { padding: 2px 8px; border-radius: 999px; border: 1px solid #e5e7eb; }
+.cRed { background: #ffebee; }
+.cOrange { background: #fff3e0; }
+.cGreen { background: #e8f5e9; }
+.cGrey { background: #f3f4f6; }
+
 @media (max-width: 900px) {
   .layout { grid-template-columns: 1fr; }
-  .panel { position: absolute; inset: 0 auto 0 0; width: 85vw; max-width: 420px; transform: translateX(-100%); transition: .2s; z-index: 10; }
+  .panel {
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: 85vw;
+    max-width: 420px;
+    transform: translateX(-100%);
+    transition: .2s;
+    z-index: 10;
+  }
   .panel.open { transform: translateX(0); }
 }
 </style>
