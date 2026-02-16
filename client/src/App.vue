@@ -34,6 +34,7 @@
           <div class="k">סטטוס</div>
           <div class="v">{{ status }}</div>
         </div>
+        <div class="hint" v-if="lastXYText">{{ lastXYText }}</div>
       </div>
 
       <div class="box">
@@ -46,7 +47,7 @@
         <div v-else class="kvList">
           <div class="kv">
             <div class="k">OBJECTID</div>
-            <div class="v mono">{{ selectedProps.OBJECTID ?? '—' }}</div>
+            <div class="v mono">{{ pickedOidVal ?? '—' }}</div>
           </div>
 
           <div class="kv">
@@ -74,9 +75,8 @@
       <div class="box">
         <div class="sectionTitle">טיפים מהירים</div>
         <ul class="tips">
-          <li>אם אתה רואה “חסר טוקן” – שים את הטוקן ב־GitHub Secrets בשם <span class="mono">VITE_GOVMAP_TOKEN</span>.</li>
-          <li>אם “לא נמצא בניין” – נסה להתקרב עוד, או ודא שהשכבה ({{ govmapLayerId }}) דולקת ב־GOVMAP.</li>
-          <li>הקוד מסמן את הבניין במפה ע״י <span class="mono">OBJECTID</span> (אם קיים בשכבה).</li>
+          <li>אם אתה רואה “חסר טוקן” – ודא שב־GitHub Actions אתה מעביר את <span class="mono">VITE_GOVMAP_TOKEN</span> כ־env בזמן ה־build (דוגמה למטה).</li>
+          <li>ה־identify רגיש לזום; אם לא מוצא כלום נסה להתקרב/להתרחק קצת. :contentReference[oaicite:1]{index=1}</li>
         </ul>
       </div>
     </aside>
@@ -92,11 +92,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 
 // ====== GOVMAP CONFIG ======
-// שכבת המשתמש שהעלית ל־GOVMAP (מספר שכבה)
 const govmapLayerId = '225287'
-
-// מומלץ: להגדיר GitHub Secret בשם VITE_GOVMAP_TOKEN
-// Settings -> Secrets and variables -> Actions -> New repository secret
 const govmapToken = (import.meta.env.VITE_GOVMAP_TOKEN || '').trim()
 
 // ====== UI STATE ======
@@ -105,11 +101,11 @@ const cohThreshold = ref(0.35)
 
 const status = ref('מאתחל…')
 const hudText = ref('')
+const lastXYText = ref('')
 const selectedProps = ref(null)
 const mapReady = ref(false)
 
-let unsubClick = null
-let unsubMove = null
+let eventsBound = false
 
 // ====== HELPERS ======
 function fmt(v) {
@@ -133,17 +129,14 @@ function throttle(fn, ms) {
   let last = 0
   let timer = null
   let queuedArgs = null
-
   return (...args) => {
     const now = Date.now()
     const remain = ms - (now - last)
-
     if (remain <= 0) {
       last = now
       fn(...args)
       return
     }
-
     queuedArgs = args
     clearTimeout(timer)
     timer = setTimeout(() => {
@@ -160,7 +153,6 @@ function reload() {
 
 function ensureGovMapScriptLoaded() {
   if (window.govmap) return Promise.resolve()
-
   return new Promise((resolve, reject) => {
     const s = document.createElement('script')
     s.src = 'https://www.govmap.gov.il/govmap/api/govmap.api.js'
@@ -169,6 +161,26 @@ function ensureGovMapScriptLoaded() {
     s.onerror = () => reject(new Error('לא הצלחתי לטעון את GOVMAP API'))
     document.head.appendChild(s)
   })
+}
+
+// מחלץ XY “בטוח” מהאירוע (ומונע NaN/null שגורמים ל-crash)
+function getFiniteXY(e) {
+  const mp = e?.mapPoint || e?.data?.mapPoint || e?.point || null
+  const xRaw = mp?.x ?? e?.x ?? null
+  const yRaw = mp?.y ?? e?.y ?? null
+
+  const x = typeof xRaw === 'string' ? Number.parseFloat(xRaw) : Number(xRaw)
+  const y = typeof yRaw === 'string' ? Number.parseFloat(yRaw) : Number(yRaw)
+
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return null
+  return { x, y }
+}
+
+function pickObjectIdField(props) {
+  if (!props) return null
+  const keys = Object.keys(props)
+  const k = keys.find((kk) => String(kk).toLowerCase() === 'objectid')
+  return k || null
 }
 
 // ====== SUBSIDENCE DERIVATION (אם יש שדות) ======
@@ -199,6 +211,12 @@ const derived = computed(() => {
   }
 })
 
+const pickedOidField = computed(() => pickObjectIdField(selectedProps.value))
+const pickedOidVal = computed(() => {
+  const f = pickedOidField.value
+  return f ? selectedProps.value?.[f] : null
+})
+
 // ====== GOVMAP MAP ======
 function focusIsrael() {
   if (!window.govmap) return
@@ -206,19 +224,18 @@ function focusIsrael() {
 }
 
 async function selectOnMapByObjectId(objectId, oidField) {
-  if (!window.govmap || objectId === null || objectId === undefined) return
-
-  const layer = govmapLayerId
-  if (!oidField) return
+  if (!window.govmap) return
+  const oid = Number(objectId)
+  if (!Number.isFinite(oid) || !oidField) return
 
   try {
     await window.govmap.selectFeaturesOnMap({
-      layers: [layer],
+      layers: [govmapLayerId],
       whereClause: {
-        [layer]: `(${oidField} = ${Number(objectId)})`,
+        [govmapLayerId]: `${oidField} = ${oid}`,
       },
       returnFields: {
-        [layer]: [oidField],
+        [govmapLayerId]: [oidField],
       },
       selectOnMap: true,
       isZoomToExtent: false,
@@ -231,10 +248,15 @@ async function selectOnMapByObjectId(objectId, oidField) {
 
 async function identifyAt(x, y) {
   if (!window.govmap) return
+  if (!Number.isFinite(x) || !Number.isFinite(y)) {
+    status.value = 'קואורדינטות לא תקינות (התעלמתי כדי לא להפיל את האתר)'
+    return
+  }
 
   status.value = 'מזהה…'
 
   try {
+    // govmap.identifyByXYAndLayer(x, y, layers) :contentReference[oaicite:2]{index=2}
     const res = await window.govmap.identifyByXYAndLayer(x, y, [govmapLayerId])
     const ent = res?.data?.[0]?.entities?.[0]
 
@@ -248,7 +270,7 @@ async function identifyAt(x, y) {
     selectedProps.value = props
     status.value = 'נמצא בניין'
 
-    const oidField = ('objectid' in props) ? 'objectid' : (('OBJECTID' in props) ? 'OBJECTID' : null)
+    const oidField = pickObjectIdField(props)
     const oidVal = oidField ? props[oidField] : null
     if (oidField && oidVal !== null && oidVal !== undefined) {
       await selectOnMapByObjectId(oidVal, oidField)
@@ -261,22 +283,27 @@ async function identifyAt(x, y) {
 
 function bindGovMapEvents() {
   const gm = window.govmap
-  if (!gm?.onEvent || !gm?.events) return
+  if (!gm?.onEvent || !gm?.events || eventsBound) return
+  eventsBound = true
 
-  unsubClick = gm.onEvent(gm.events.CLICK).progress((e) => {
-    const x = e?.mapPoint?.x
-    const y = e?.mapPoint?.y
-    if (typeof x === 'number' && typeof y === 'number') {
-      identifyAt(x, y)
+  gm.onEvent(gm.events.CLICK).progress((e) => {
+    const xy = getFiniteXY(e)
+    if (!xy) {
+      status.value = 'לחיצה ללא קואורדינטות (התעלמתי)'
+      return
     }
+    lastXYText.value = `XY: ${xy.x.toFixed(2)}, ${xy.y.toFixed(2)}`
+    identifyAt(xy.x, xy.y)
   })
 
-  unsubMove = gm.onEvent(gm.events.MOUSE_MOVE).progress(
+  gm.onEvent(gm.events.MOUSE_MOVE).progress(
     throttle((e) => {
-      const x = e?.mapPoint?.x
-      const y = e?.mapPoint?.y
-      if (typeof x !== 'number' || typeof y !== 'number') return
-      hudText.value = `X: ${x.toFixed(2)}   Y: ${y.toFixed(2)}`
+      const xy = getFiniteXY(e)
+      if (!xy) {
+        hudText.value = ''
+        return
+      }
+      hudText.value = `X: ${xy.x.toFixed(2)}   Y: ${xy.y.toFixed(2)}`
     }, 120),
   )
 }
@@ -294,6 +321,7 @@ async function initGovMap() {
   window.govmap.createMap('map', {
     token: govmapToken,
     layers: [govmapLayerId],
+    visibleLayers: [govmapLayerId], // חשוב כדי שהשכבה תהיה דלוקה :contentReference[oaicite:3]{index=3}
     showXY: false,
     identifyOnClick: false,
     isEmbeddedToggle: false,
@@ -318,8 +346,9 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
-  try { unsubClick?.unsubscribe?.() } catch {}
-  try { unsubMove?.unsubscribe?.() } catch {}
+  // הסרה מסודרת לפי ה-API :contentReference[oaicite:4]{index=4}
+  try { window.govmap?.unbindEvent?.(window.govmap?.events?.CLICK) } catch {}
+  try { window.govmap?.unbindEvent?.(window.govmap?.events?.MOUSE_MOVE) } catch {}
 })
 </script>
 
@@ -371,9 +400,7 @@ html, body {
 }
 
 .title { font-size: 22px; font-weight: 800; letter-spacing: 0.2px; }
-
 .sub { font-size: 13px; color: var(--muted); margin-top: 2px; }
-
 .topBtns { display: flex; gap: 8px; }
 
 .btn {
@@ -420,7 +447,6 @@ input {
 .hint { margin-top: 6px; font-size: 12px; color: var(--muted); }
 
 .sectionTitle { font-weight: 800; margin-bottom: 10px; }
-
 .empty { color: var(--muted); line-height: 1.4; }
 
 .kpi { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
