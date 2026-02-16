@@ -1,1055 +1,491 @@
 <template>
-  <div class="appRoot" dir="rtl">
-    <!-- Loading -->
-    <div v-if="!mapReady" id="loading">
-      <div class="spinner"></div>
-      <div class="loadingText">טוען מפה…</div>
-      <div class="loadingHint" v-if="!govmapToken">
-        חסר טוקן: <span class="mono">VITE_GOVMAP_TOKEN</span>
-      </div>
-    </div>
-
-    <!-- Map -->
-    <div id="map" class="map"></div>
-
-    <!-- Top Always-Open Search Bar -->
-    <div id="top-searchbar" ref="searchBarRef">
-      <button id="addrBtn" type="button" @click="onSearchBtnClick">חפש</button>
-
-      <input
-        id="addrInput"
-        v-model.trim="addrQuery"
-        type="text"
-        placeholder="לדוגמה: דיזנגוף 50 תל אביב"
-        autocomplete="off"
-        @keydown.enter.prevent="onSearchBtnClick"
-        @keydown.esc="closeAddrResults"
-        @input="onAddrInput"
-      />
-
-      <div id="addrResults" v-show="addrOpen">
-        <div
-          v-for="(it, idx) in addrResults"
-          :key="idx"
-          class="addr-item"
-          @click="pickAddrResult(it)"
-        >
-          <div class="addr-title">{{ it.__title }}</div>
-          <div v-if="it.__sub" class="addr-sub">{{ it.__sub }}</div>
+  <div class="layout" dir="rtl">
+    <aside class="panel" :class="{ open: panelOpen }">
+      <div class="panelTop">
+        <div>
+          <div class="appTitle">SatMap</div>
+          <div class="appSub">Buildings Joined (GeoJSON)</div>
         </div>
-
-        <div v-if="addrOpen && !addrResults.length" class="addr-item">
-          לא נמצאו תוצאות
-        </div>
-      </div>
-    </div>
-
-    <!-- Panel -->
-    <aside id="info-panel" :class="{ collapsed: panelCollapsed }">
-      <div id="panel-header">
-        <h1>🛰️ SatMap – בניינים</h1>
-        <p>
-          GOVMAP שכבה: <strong>{{ govmapLayerId }}</strong><br />
-          סטטוס: <strong>{{ status }}</strong>
-        </p>
-
-        <div id="header-actions">
-          <button class="hbtn secondary" @click="aboutOpen = true">ℹ️ אודות</button>
-          <button id="panelToggleBtn" class="hbtn secondary" @click="togglePanel">
-            {{ panelCollapsed ? "➕ הגדל" : "➖ הקטן" }}
-          </button>
-        </div>
+        <button class="iconBtn" @click="panelOpen = !panelOpen" title="פתח/סגור">☰</button>
       </div>
 
-      <div id="tabs">
-        <div class="tab" :class="{ active: activeTab === 'single' }" @click="activeTab = 'single'">
-          בניין
-        </div>
-        <div class="tab" :class="{ active: activeTab === 'how' }" @click="activeTab = 'how'">
-          איך זה עובד
-        </div>
-        <div class="tab" :class="{ active: activeTab === 'debug' }" @click="activeTab = 'debug'">
-          טיפים
-        </div>
-      </div>
-
-      <div id="controls">
-        <div class="mode-grid">
-          <button class="mode-btn full primary active">🏢 שכבת בניינים</button>
-
-          <button class="mode-btn active" title="סף שקיעה (mm/yr)">
-            v סף
-          </button>
-          <button class="mode-btn" title="סף קוהרנס">
-            coh סף
-          </button>
-          <button class="mode-btn full" disabled title="אין פעולות ריפרש/התמקדות">
-            פעולות (בוטל)
-          </button>
+      <div class="box">
+        <div class="row">
+          <label>חיפוש OBJECTID</label>
+          <input v-model.trim="q" placeholder="לדוגמה: 188" />
         </div>
 
         <div class="row2">
           <div>
-            <label>סף “שוקע/חשוד” v (mm/yr)</label>
-            <input type="number" v-model.number="rateThreshold" step="0.5" />
-            <div class="hint">
-              משפיע רק אם בשכבה יש <span class="mono">vel_mean</span>
-            </div>
+            <label>סינון סטטוס</label>
+            <select v-model="statusFilter">
+              <option value="">הכל</option>
+              <option value="stable">stable</option>
+              <option value="no_data">no_data</option>
+              <option value="suspect">suspect</option>
+            </select>
           </div>
 
           <div>
-            <label>סף קוהרנס (0–1)</label>
-            <input type="number" v-model.number="cohThreshold" step="0.05" min="0" max="1" />
-            <div class="hint">
-              משפיע רק אם בשכבה יש <span class="mono">coh_mean</span>
-            </div>
+            <label>סף שקיעה (Vel_mean ≤)</label>
+            <input type="number" v-model.number="velThreshold" step="0.5" />
+            <div class="hint">לפרוטוטייפ: תנסה -2 או -5</div>
           </div>
+        </div>
+
+        <div class="row2">
+          <button class="btn" @click="fitAll" :disabled="!mapReady || !geojson">התמקד על כל הבניינים</button>
+          <button class="btn ghost" @click="reload">טען מחדש</button>
+        </div>
+
+        <div class="stats" v-if="geojson">
+          <div>סה״כ: <b>{{ totalCount }}</b></div>
+          <div>stable: <b>{{ counts.stable }}</b></div>
+          <div>no_data: <b>{{ counts.no_data }}</b></div>
+          <div>suspect: <b>{{ counts.suspect }}</b></div>
         </div>
       </div>
 
-      <div id="info-content">
-        <!-- TAB: single -->
-        <div class="tab-content" :class="{ active: activeTab === 'single' }">
-          <div id="info-title">בניין נבחר</div>
+      <div class="box" v-if="selected">
+        <div class="title2">פרטי בניין נבחר</div>
+        <div class="kv"><span>OBJECTID</span><b>{{ selected.OBJECTID ?? "—" }}</b></div>
+        <div class="kv"><span>status</span><b>{{ selected.status ?? "—" }}</b></div>
+        <div class="kv"><span>Vel_mean</span><b>{{ fmtNum(selected.Vel_mean) }}</b></div>
+        <div class="kv"><span>Vel_count</span><b>{{ selected.Vel_count ?? "—" }}</b></div>
+        <div class="kv"><span>coer_mean</span><b>{{ fmtNum(selected.coer_mean) }}</b></div>
 
-          <div v-if="!selectedProps" class="message message-info">
-            לחץ על בניין במפה כדי לשלוף מאפיינים מהשכבה ב־GOVMAP.
-          </div>
+        <div class="row2">
+          <button class="btn" @click="zoomToSelected" :disabled="!mapReady">זום לבניין</button>
+          <button class="btn ghost" @click="selected = null">נקה בחירה</button>
+        </div>
+      </div>
 
-          <div v-else class="card">
-            <div class="kpiRow">
-              <div class="kpi">
-                <div class="kpi-value mono">{{ selectedObjectId ?? "—" }}</div>
-                <div class="kpi-label">OBJECTID</div>
-              </div>
-              <div class="kpi">
-                <div class="kpi-value">{{ derived.status }}</div>
-                <div class="kpi-label">סטטוס שקיעה</div>
-              </div>
-              <div class="kpi">
-                <div class="kpi-value mono">{{ fmt(derived.coh_mean) }}</div>
-                <div class="kpi-label">coh_mean</div>
-              </div>
+      <div class="box">
+        <div class="title2">רשימה ({{ filtered.length }})</div>
+        <div class="list">
+          <button
+            v-for="item in filtered.slice(0, 250)"
+            :key="item._key"
+            class="listItem"
+            :class="{ on: selected && selected.OBJECTID === item.OBJECTID }"
+            @click="selectByObjectId(item.OBJECTID)"
+            :title="`Vel_mean=${fmtNum(item.Vel_mean)} | status=${item.status}`"
+          >
+            <div class="liTop">
+              <b>#{{ item.OBJECTID ?? "?" }}</b>
+              <span class="badge" :class="badgeClass(item)">{{ item.status || "—" }}</span>
             </div>
-
-            <div class="kvList">
-              <div class="kv">
-                <div class="k">v_mean (mm/yr)</div>
-                <div class="v mono">{{ fmt(derived.vel_mean) }}</div>
-              </div>
-
-              <div class="kv">
-                <div class="k">מס’ נקודות (אם קיים)</div>
-                <div class="v mono">{{ fmtInt(derived.n_pts) }}</div>
-              </div>
-
-              <details class="details">
-                <summary>הצג את כל השדות</summary>
-                <pre class="pre">{{ JSON.stringify(selectedProps, null, 2) }}</pre>
-              </details>
+            <div class="liSub">
+              Vel_mean: <b>{{ fmtNum(item.Vel_mean) }}</b> · Vel_count: <b>{{ item.Vel_count ?? "—" }}</b>
             </div>
-          </div>
+          </button>
         </div>
-
-        <!-- TAB: how -->
-        <div class="tab-content" :class="{ active: activeTab === 'how' }">
-          <div id="info-title">איך זה עובד</div>
-
-          <div class="message message-info">
-            האתר מציג שכבת <strong>בניינים</strong> מ־GOVMAP.
-            בלחיצה על בניין מתבצע <span class="mono">identify</span> ומוצגים השדות.
-          </div>
-
-          <div class="message message-warn">
-            “שקיעה/חשוד” מחושב רק אם בשכבה קיימים שדות כמו
-            <span class="mono">vel_mean</span> (מהירות, mm/yr) ו־<span class="mono">coh_mean</span> (קוהרנס).
-          </div>
-
-          <div class="message message-info">
-            חיפוש כתובת למעלה עובד עם <span class="mono">govmap.geocode</span>
-            ומבצע <span class="mono">zoomToXY</span> לתוצאה שנבחרה.
-          </div>
+        <div class="hint" v-if="filtered.length > 250">
+          מוצגים 250 ראשונים (כדי לא להכביד על הדפדפן).
         </div>
+      </div>
 
-        <!-- TAB: debug -->
-        <div class="tab-content" :class="{ active: activeTab === 'debug' }">
-          <div id="info-title">טיפים מהירים</div>
-
-          <ul class="tips">
-            <li>
-              אם מופיע “חסר טוקן” – הוסף Secret בשם
-              <span class="mono">VITE_GOVMAP_TOKEN</span>.
-            </li>
-            <li>
-              אם “לא נמצא בניין” – תתקרב עוד / ודא שהשכבה {{ govmapLayerId }} זמינה.
-            </li>
-            <li>
-              החיפוש לא תלוי בנתוני הבניינים – הוא עובד גם לפני בחירת בניין.
-            </li>
-          </ul>
-        </div>
+      <div class="box error" v-if="error">
+        {{ error }}
       </div>
     </aside>
 
-    <!-- About modal -->
-    <div class="modal" v-if="aboutOpen" aria-hidden="false">
-      <div class="modalOverlay" @click="aboutOpen = false"></div>
-      <div class="modalCard" role="dialog">
-        <div class="modalHeader">
-          <div class="modalHeaderTitle">ℹ️ אודות</div>
-          <button class="modalClose" @click="aboutOpen = false">×</button>
-        </div>
-        <div class="modalBody">
-          <p style="margin-top:0; font-weight:900">
-            SatMap – תצוגת בניינים מ־GOVMAP + שליפת מאפיינים בלחיצה.
-          </p>
-          <ul style="margin:0; padding-right:18px; font-weight:900; color:#333; line-height:1.6">
-            <li>חיפוש כתובת: <span class="mono">govmap.geocode</span></li>
-            <li>שליפת בניין: <span class="mono">identifyByXYAndLayer</span></li>
-            <li>חישוב “שקיעה”: לפי שדות <span class="mono">vel_mean/coh_mean</span> אם קיימים</li>
-          </ul>
-        </div>
+    <main class="mapWrap">
+      <div ref="mapEl" class="map"></div>
+
+      <div class="loading" v-if="loading">
+        טוען GeoJSON…
       </div>
-    </div>
+    </main>
   </div>
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { ref, computed, onMounted, onBeforeUnmount, watch } from "vue";
+import maplibregl from "maplibre-gl";
+import "maplibre-gl/dist/maplibre-gl.css";
 
-// ===== GOVMAP CONFIG =====
-const govmapLayerId = "225287";
-const govmapToken = (import.meta.env.VITE_GOVMAP_TOKEN || "").trim();
-
-// ===== UI STATE =====
-const status = ref("מאתחל…");
+const mapEl = ref(null);
+const map = ref(null);
 const mapReady = ref(false);
 
-const panelCollapsed = ref(false);
-const activeTab = ref("single");
-const aboutOpen = ref(false);
+const geojson = ref(null);
+const loading = ref(false);
+const error = ref("");
 
-// thresholds
-const rateThreshold = ref(-2.0);
-const cohThreshold = ref(0.35);
+const panelOpen = ref(true);
+const selected = ref(null);
 
-// building selection
-const selectedProps = ref(null);
+const q = ref("");
+const statusFilter = ref("");
+const velThreshold = ref(-2);
 
-// address search
-const addrQuery = ref("");
-const addrResults = ref([]);
-const addrOpen = ref(false);
-let addrReqId = 0;
-let debounceTimer = null;
-const searchBarRef = ref(null);
+const GEOJSON_URL = computed(() => {
+  const base = import.meta.env.BASE_URL || "/";
+  return `${base}data/buildings_joined.geojson`;
+});
 
-// govmap unsub
-let unsubClick = null;
-
-// ===== HELPERS =====
-function fmt(v) {
-  if (v === null || v === undefined || Number.isNaN(v)) return "—";
+function fmtNum(v) {
   const n = Number(v);
   if (!Number.isFinite(n)) return "—";
   return n.toFixed(3);
 }
-function fmtInt(v) {
-  if (v === null || v === undefined || Number.isNaN(v)) return "—";
-  const n = Number(v);
-  if (!Number.isFinite(n)) return "—";
-  return Math.round(n).toLocaleString();
-}
-function togglePanel() {
-  panelCollapsed.value = !panelCollapsed.value;
+
+function normProps(f) {
+  const p = f?.properties || {};
+  return {
+    _key: p.OBJECTID ?? Math.random().toString(36).slice(2),
+    OBJECTID: p.OBJECTID,
+    coer_mean: p.coer_mean,
+    Vel_count: p.Vel_count,
+    Vel_mean: p.Vel_mean,
+    status: p.status,
+  };
 }
 
-function fieldsToObject(fields) {
-  const out = {};
-  for (const f of fields || []) {
-    const key = f?.fieldName ?? f?.FieldName ?? f?.name ?? f?.field;
-    const val = f?.value ?? f?.Value ?? f?.fieldValue;
-    if (key !== undefined) out[key] = val;
+const allItems = computed(() => (geojson.value?.features || []).map(normProps));
+
+const totalCount = computed(() => allItems.value.length);
+
+const counts = computed(() => {
+  const out = { stable: 0, no_data: 0, suspect: 0, other: 0 };
+  for (const it of allItems.value) {
+    if (it.status === "stable") out.stable++;
+    else if (it.status === "no_data") out.no_data++;
+    else if (it.status === "suspect") out.suspect++;
+    else out.other++;
   }
   return out;
-}
-function findObjectIdField(props) {
-  if (!props) return null;
-  const keys = Object.keys(props);
-  const lower = new Map(keys.map((k) => [k.toLowerCase(), k]));
-  if (lower.has("objectid")) return lower.get("objectid");
-  if (lower.has("oid")) return lower.get("oid");
-  return null;
-}
-const selectedObjectId = computed(() => {
-  const p = selectedProps.value || null;
-  if (!p) return null;
-  const oidKey = findObjectIdField(p);
-  return oidKey ? p[oidKey] : (p.OBJECTID ?? p.objectid ?? null);
 });
 
-// ===== DERIVED SUBSIDENCE (if fields exist) =====
-const derived = computed(() => {
-  const p = selectedProps.value || {};
+const filtered = computed(() => {
+  let arr = allItems.value;
 
-  const vRaw =
-    p.vel_mean ?? p.VEL_MEAN ?? p.VELmean ?? p.VelMean ?? p.velocity_mean;
-  const cRaw =
-    p.coh_mean ?? p.COH_MEAN ?? p.COHmean ?? p.CohMean ?? p.coherence_mean;
-
-  const nRaw =
-    p.n_pts ?? p.N_PTS ?? p.NPTS ?? p.num_pts ?? p.points_n ?? p.points;
-
-  const v = Number(vRaw);
-  const c = Number(cRaw);
-  const n = Number(nRaw);
-
-  const hasV = Number.isFinite(v);
-  const hasC = Number.isFinite(c);
-  const hasN = Number.isFinite(n);
-
-  let s = "אין נתוני InSAR בשכבה";
-  if (hasV || hasC) {
-    const cohOk = hasC ? c >= cohThreshold.value : true;
-    if (!cohOk) s = "קוהרנס נמוך (לא אמין)";
-    else if (hasV && v <= rateThreshold.value) s = "שוקע/חשוד";
-    else s = "נראה תקין";
+  if (q.value) {
+    const qq = q.value.toLowerCase();
+    arr = arr.filter((it) => String(it.OBJECTID ?? "").toLowerCase().includes(qq));
   }
 
-  return {
-    vel_mean: hasV ? v : null,
-    coh_mean: hasC ? c : null,
-    n_pts: hasN ? n : null,
-    status: s,
-  };
-});
+  if (statusFilter.value) {
+    arr = arr.filter((it) => it.status === statusFilter.value);
+  }
 
-// ===== GOVMAP LOAD =====
-function ensureGovMapScriptLoaded() {
-  if (window.govmap) return Promise.resolve();
-
-  return new Promise((resolve, reject) => {
-    const s = document.createElement("script");
-    s.src = "https://www.govmap.gov.il/govmap/api/govmap.api.js";
-    s.defer = true;
-    s.onload = () => resolve();
-    s.onerror = () => reject(new Error("לא הצלחתי לטעון את GOVMAP API"));
-    document.head.appendChild(s);
-  });
-}
-
-async function selectOnMapByObjectId(objectId, oidField) {
-  if (!window.govmap || objectId == null || !oidField) return;
-
-  const layer = govmapLayerId;
-  try {
-    await window.govmap.selectFeaturesOnMap({
-      layers: [layer],
-      whereClause: {
-        [layer]: `(${oidField} = ${Number(objectId)})`,
-      },
-      returnFields: {
-        [layer]: [oidField],
-      },
-      selectOnMap: true,
-      isZoomToExtent: false,
-      continous: false,
+  // “חשוד לשקיעה” לפי Vel_mean
+  const thr = Number(velThreshold.value);
+  if (Number.isFinite(thr)) {
+    arr = arr.filter((it) => {
+      const v = Number(it.Vel_mean);
+      // אם אין נתון, לא מסננים אותו החוצה בכוח (תוכל לשנות אם בא לך)
+      if (!Number.isFinite(v)) return true;
+      return v <= thr || it.status === "no_data" || it.status === "stable";
     });
-  } catch (_) {
-    // no-op (avoid noisy logs)
   }
+
+  // ממיין: קודם מי שיש לו Vel_mean “חזק” (בערך מוחלט)
+  return [...arr].sort((a, b) => Math.abs(Number(b.Vel_mean) || 0) - Math.abs(Number(a.Vel_mean) || 0));
+});
+
+function badgeClass(item) {
+  const v = Number(item.Vel_mean);
+  if (item.status === "no_data") return "bGrey";
+  if (Number.isFinite(v) && v <= -5) return "bRed";
+  if (Number.isFinite(v) && v <= -2) return "bOrange";
+  return "bGreen";
 }
 
-async function identifyAt(x, y) {
-  if (!window.govmap) return;
-
-  status.value = "מזהה…";
+async function loadGeoJSON() {
+  loading.value = true;
+  error.value = "";
   try {
-    const res = await window.govmap.identifyByXYAndLayer(x, y, [govmapLayerId]);
-    const ent = res?.data?.[0]?.entities?.[0];
-
-    if (!ent) {
-      selectedProps.value = null;
-      status.value = "לא נמצא בניין בנקודה";
-      return;
-    }
-
-    const props = fieldsToObject(ent.fields);
-    selectedProps.value = props;
-    status.value = "נמצא בניין";
-
-    const oidField = findObjectIdField(props);
-    const oidVal = oidField ? props[oidField] : null;
-    if (oidField && oidVal != null) await selectOnMapByObjectId(oidVal, oidField);
-  } catch (_) {
-    status.value = "שגיאה בזיהוי (בדוק טוקן/שכבה)";
+    const res = await fetch(GEOJSON_URL.value, { cache: "no-store" });
+    if (!res.ok) throw new Error(`נכשל לטעון GeoJSON (${res.status})`);
+    const j = await res.json();
+    if (!j || j.type !== "FeatureCollection") throw new Error("הקובץ לא נראה כמו FeatureCollection");
+    geojson.value = j;
+  } catch (e) {
+    error.value = e?.message || String(e);
+    geojson.value = null;
+  } finally {
+    loading.value = false;
   }
 }
 
-function bindGovMapClick() {
-  const gm = window.govmap;
-  if (!gm?.onEvent || !gm?.events) return;
+function initMap() {
+  map.value = new maplibregl.Map({
+    container: mapEl.value,
+    style: "https://demotiles.maplibre.org/style.json",
+    center: [34.8, 32.1],
+    zoom: 8,
+  });
 
-  unsubClick = gm.onEvent(gm.events.CLICK).progress((e) => {
-    const x = e?.mapPoint?.x;
-    const y = e?.mapPoint?.y;
-    if (typeof x === "number" && typeof y === "number") identifyAt(x, y);
+  map.value.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), "top-left");
+
+  map.value.on("load", () => {
+    mapReady.value = true;
+    if (geojson.value) upsertGeojsonLayer();
+  });
+
+  map.value.on("click", "buildings-fill", (e) => {
+    const f = e?.features?.[0];
+    if (!f) return;
+    selected.value = f.properties || null;
+  });
+
+  map.value.on("mouseenter", "buildings-fill", () => {
+    map.value.getCanvas().style.cursor = "pointer";
+  });
+  map.value.on("mouseleave", "buildings-fill", () => {
+    map.value.getCanvas().style.cursor = "";
   });
 }
 
-async function initGovMap() {
-  await ensureGovMapScriptLoaded();
+function upsertGeojsonLayer() {
+  if (!mapReady.value || !map.value || !geojson.value) return;
 
-  if (!govmapToken) {
-    status.value = "חסר טוקן GOVMAP (VITE_GOVMAP_TOKEN)";
-    return;
+  const m = map.value;
+
+  // source
+  if (m.getSource("buildings")) {
+    m.getSource("buildings").setData(geojson.value);
+  } else {
+    m.addSource("buildings", { type: "geojson", data: geojson.value });
   }
 
-  status.value = "טוען מפה…";
+  // layers
+  if (!m.getLayer("buildings-fill")) {
+    m.addLayer({
+      id: "buildings-fill",
+      type: "fill",
+      source: "buildings",
+      paint: {
+        "fill-opacity": 0.55,
+        "fill-color": [
+          "case",
+          ["==", ["get", "status"], "no_data"], "#9aa0a6",
+          ["<=", ["to-number", ["get", "Vel_mean"]], -5], "#e53935",
+          ["<=", ["to-number", ["get", "Vel_mean"]], -2], "#fb8c00",
+          "#43a047"
+        ],
+      },
+    });
 
-  window.govmap.createMap("map", {
-    token: govmapToken,
-    layers: [govmapLayerId],
-    showXY: false,
-    identifyOnClick: false,
-    isEmbeddedToggle: false,
-    zoomButtons: true,
-    background: 1,
-    layersMode: 4,
-    level: 7,
-    onLoad: () => {
-      mapReady.value = true;
-      status.value = "מוכן – לחץ על בניין במפה";
-      // פתיחה בישראל (בלי כפתור)
-      try {
-        window.govmap.zoomToXY?.({ x: 176000, y: 655000, level: 7, marker: false });
-      } catch (_) {}
-      bindGovMapClick();
-    },
+    m.addLayer({
+      id: "buildings-outline",
+      type: "line",
+      source: "buildings",
+      paint: { "line-width": 1, "line-opacity": 0.8 },
+    });
+  }
+
+  fitAll();
+}
+
+function walkCoords(coords, cb) {
+  if (!Array.isArray(coords)) return;
+  if (typeof coords[0] === "number" && typeof coords[1] === "number") {
+    cb(coords[0], coords[1]);
+    return;
+  }
+  for (const c of coords) walkCoords(c, cb);
+}
+
+function bboxFromFeature(f) {
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  walkCoords(f?.geometry?.coordinates, (x, y) => {
+    if (x < minX) minX = x;
+    if (y < minY) minY = y;
+    if (x > maxX) maxX = x;
+    if (y > maxY) maxY = y;
   });
+  if (![minX, minY, maxX, maxY].every(Number.isFinite)) return null;
+  return [[minX, minY], [maxX, maxY]];
 }
 
-// ===== Address search (govmap.geocode) =====
-function parseGeocodeList(resp) {
-  const list = resp?.data || resp?.Data || resp?.results || resp;
-  if (Array.isArray(list)) return list;
-  if (Array.isArray(list?.Result)) return list.Result;
-  return [];
-}
-
-function extractXY(item) {
-  const x = item?.X ?? item?.x ?? item?.CenterX ?? item?.centerX ?? item?.Lon ?? item?.lon;
-  const y = item?.Y ?? item?.y ?? item?.CenterY ?? item?.centerY ?? item?.Lat ?? item?.lat;
-  return { x: Number(x), y: Number(y) };
-}
-
-function closeAddrResults() {
-  addrOpen.value = false;
-}
-
-function focusToGeocodeItem(item) {
-  if (!mapReady.value) return;
-
-  const { x, y } = extractXY(item);
-  if (!Number.isFinite(x) || !Number.isFinite(y)) {
-    status.value = "תוצאה בלי קואורדינטות";
-    return;
+function bboxFromGeojson(gj) {
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const f of gj?.features || []) {
+    walkCoords(f?.geometry?.coordinates, (x, y) => {
+      if (x < minX) minX = x;
+      if (y < minY) minY = y;
+      if (x > maxX) maxX = x;
+      if (y > maxY) maxY = y;
+    });
   }
-  try {
-    window.govmap.zoomToXY({ x, y, level: 10, marker: true });
-  } catch (_) {}
+  if (![minX, minY, maxX, maxY].every(Number.isFinite)) return null;
+  return [[minX, minY], [maxX, maxY]];
 }
 
-function pickAddrResult(item) {
-  focusToGeocodeItem(item);
-  closeAddrResults();
-  status.value = `התמקדתי לכתובת: ${item.__title || "תוצאה"}`;
+function fitAll() {
+  if (!mapReady.value || !geojson.value) return;
+  const bb = bboxFromGeojson(geojson.value);
+  if (!bb) return;
+  map.value.fitBounds(bb, { padding: 40, duration: 700 });
 }
 
-function mapResultLabel(r, fallbackQ) {
-  const candidates = [
-    r?.SettlementName, r?.settlementName,
-    r?.PlaceName, r?.placeName,
-    r?.Name, r?.name,
-    r?.ResultLabel, r?.resultLabel,
-    r?.Address, r?.address,
-    r?.Title, r?.title,
-    r?.label,
-  ]
-    .map((x) => (x == null ? "" : String(x).trim()))
-    .filter(Boolean);
-
-  const title = candidates[0] || fallbackQ;
-  const sub =
-    String(r?.City || r?.city || r?.Region || r?.region || r?.Street || r?.street || r?.SubTitle || r?.subTitle || "").trim();
-
-  return { __title: title, __sub: sub };
+function zoomToSelected() {
+  if (!mapReady.value || !selected.value || !geojson.value) return;
+  // למצוא את הפיצ’ר המקורי כדי לקחת גיאומטריה
+  const f = (geojson.value.features || []).find((x) => x?.properties?.OBJECTID === selected.value.OBJECTID);
+  if (!f) return;
+  const bb = bboxFromFeature(f);
+  if (!bb) return;
+  map.value.fitBounds(bb, { padding: 60, duration: 700 });
 }
 
-function runGeocode(q) {
-  const query = String(q || "").trim();
-  if (!query) return;
-
-  if (!mapReady.value) {
-    status.value = "המפה עדיין נטענת…";
-    return;
-  }
-
-  const myId = ++addrReqId;
-  addrOpen.value = true;
-  addrResults.value = [];
-
-  status.value = `מחפש כתובת: ${query}`;
-
-  const payload = { keyword: query };
-  if (window.govmap?.geocodeType?.AccuracyOnly) payload.type = window.govmap.geocodeType.AccuracyOnly;
-
-  let res;
-  try {
-    res = window.govmap.geocode(payload);
-  } catch (_) {
-    status.value = "שגיאה בחיפוש כתובת";
-    addrResults.value = [];
-    return;
-  }
-
-  const onSuccess = (resp) => {
-    if (myId !== addrReqId) return;
-    const list = parseGeocodeList(resp).slice(0, 10);
-    addrResults.value = list.map((r) => ({ ...r, ...mapResultLabel(r, query) }));
-    status.value = addrResults.value.length ? "בחר תוצאה מהרשימה" : "לא נמצאו תוצאות";
-  };
-
-  const onFail = () => {
-    if (myId !== addrReqId) return;
-    status.value = "לא ניתן לבצע חיפוש";
-    addrResults.value = [];
-  };
-
-  if (res && typeof res.then === "function") res.then(onSuccess).catch(onFail);
-  else if (res && typeof res.done === "function") res.done(onSuccess).fail(onFail);
-  else onFail();
+function selectByObjectId(objectId) {
+  const f = (geojson.value?.features || []).find((x) => x?.properties?.OBJECTID === objectId);
+  if (!f) return;
+  selected.value = f.properties || null;
+  zoomToSelected();
 }
 
-function onAddrInput() {
-  if (debounceTimer) clearTimeout(debounceTimer);
-  const q = addrQuery.value.trim();
-  if (q.length < 3) {
-    addrOpen.value = false;
-    addrResults.value = [];
-    return;
-  }
-  debounceTimer = setTimeout(() => runGeocode(q), 350);
+async function reload() {
+  await loadGeoJSON();
+  if (mapReady.value && geojson.value) upsertGeojsonLayer();
 }
 
-function onSearchBtnClick() {
-  const q = addrQuery.value.trim();
-  if (!q) return;
+onMounted(async () => {
+  await loadGeoJSON();
+  initMap();
+});
 
-  // אם כבר יש תוצאות פתוחות – קפוץ לראשונה
-  if (addrOpen.value && addrResults.value.length) {
-    pickAddrResult(addrResults.value[0]);
-    return;
-  }
-  runGeocode(q);
-}
-
-// ===== Mobile vh fix =====
-function setMobileVh() {
-  const vh = window.innerHeight * 0.01;
-  document.documentElement.style.setProperty("--vh", `${vh}px`);
-}
-
-onMounted(() => {
-  setMobileVh();
-  window.addEventListener("resize", setMobileVh);
-  if (window.visualViewport) window.visualViewport.addEventListener("resize", setMobileVh);
-
-  // close dropdown on outside click
-  document.addEventListener("click", (e) => {
-    const root = searchBarRef.value;
-    if (!root) return;
-    if (addrOpen.value && !root.contains(e.target)) addrOpen.value = false;
-  });
-
-  initGovMap().catch(() => {
-    status.value = "כשלון באתחול GOVMAP";
-  });
+watch(geojson, () => {
+  if (mapReady.value && geojson.value) upsertGeojsonLayer();
 });
 
 onBeforeUnmount(() => {
-  try { unsubClick?.unsubscribe?.(); } catch {}
-  window.removeEventListener("resize", setMobileVh);
-  if (window.visualViewport) window.visualViewport.removeEventListener("resize", setMobileVh);
+  try { map.value?.remove(); } catch {}
 });
 </script>
 
-<style>
-* { box-sizing: border-box; }
-
-:root {
-  --bg: #f5f5f5;
-  --blue1: #0b63ce;
-  --blue2: #084eac;
-}
-
-html, body {
-  margin: 0;
-  padding: 0;
-  height: 100%;
+<style scoped>
+.layout {
+  display: grid;
+  grid-template-columns: 380px 1fr;
+  height: 100vh;
+  background: #f6f7f9;
   overflow: hidden;
-  background: var(--bg);
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
-  font-size: 15px;
 }
 
-.appRoot { height: 100vh; width: 100vw; position: relative; }
-
-.map {
-  position: absolute;
-  inset: 0;
-}
-
-/* Loading */
-#loading{
-  position:absolute;
-  top:50%;
-  left:50%;
-  transform:translate(-50%,-50%);
-  background:#fff;
-  padding:24px 28px;
-  border-radius:16px;
-  box-shadow:0 10px 30px rgba(0,0,0,0.22);
-  z-index:10000;
-  text-align:center;
-}
-.spinner{
-  width:40px;
-  height:40px;
-  margin:0 auto 14px;
-  border:4px solid #e7e7e7;
-  border-top:4px solid var(--blue1);
-  border-radius:50%;
-  animation:spin 0.8s linear infinite;
-}
-@keyframes spin{0%{transform:rotate(0deg)}100%{transform:rotate(360deg)}}
-.loadingText{font-size:14px;color:#333;font-weight:1000}
-.loadingHint{margin-top:10px;font-size:12.5px;color:#666;font-weight:900}
-
-/* ===== Always-open top search bar ===== */
-#top-searchbar{
-  position: fixed;
-  top: 12px;
-  left: 50%;
-  transform: translateX(-50%);
-  width: min(760px, calc(100vw - 24px));
-  z-index: 30000;
+.panel {
+  border-left: 1px solid #e5e7eb;
   background: #fff;
-  border-radius: 999px;
-  padding: 8px;
-  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.16);
-  border: 2px solid rgba(11, 99, 206, 0.35);
+  height: 100%;
+  overflow: auto;
+}
+.panelTop {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: #fff;
+  border-bottom: 1px solid #e5e7eb;
+  padding: 12px;
   display: flex;
   align-items: center;
-  gap: 10px;
+  justify-content: space-between;
 }
-#addrInput{
-  flex:1;
-  border:2px solid #111;
-  border-radius:999px;
-  padding:10px 12px;
-  font-weight:900;
-  font-size:14px;
-  outline:none;
-  text-align:right;
-  direction:rtl;
-}
-#addrBtn{
-  padding:10px 14px;
-  background: var(--blue1);
-  color:#fff;
-  border:none;
-  border-radius:999px;
-  cursor:pointer;
-  font-weight:1000;
-  font-size:14px;
-  white-space:nowrap;
-}
-#addrBtn:active{ transform: translateY(1px); }
+.appTitle { font-size: 18px; font-weight: 800; }
+.appSub { font-size: 12px; opacity: 0.7; margin-top: 2px; }
 
-#addrResults{
-  position:absolute;
-  top: calc(100% + 10px);
-  right: 0;
-  left: 0;
-  border:1px solid #e0e0e0;
-  background:#fff;
-  border-radius:16px;
-  overflow:hidden;
-  max-height:320px;
-  overflow-y:auto;
-  box-shadow:0 10px 22px rgba(0,0,0,0.10);
-}
-.addr-item{
-  padding:10px 12px;
-  cursor:pointer;
-  font-size:14px;
-  border-bottom:1px solid #f0f0f0;
-  font-weight:900;
-}
-.addr-item:last-child{ border-bottom:none; }
-.addr-item:hover{ background:#f5f9ff; }
-.addr-title{ font-weight:1000; color:#111; }
-.addr-sub{ font-size:12.5px; color:#666; margin-top:3px; font-weight:800; }
-
-/* PANEL */
-#info-panel{
-  position: absolute;
-  top: 15px;
-  right: 30px;
-  z-index: 25000;
-  background: white;
-  padding: 0;
-  border-radius: 14px;
-  width: 440px;
-  max-height: calc(100vh - 30px);
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.15);
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-  transition: height 0.2s ease, max-height 0.2s ease;
-}
-
-#panel-header{
-  background: linear-gradient(135deg, var(--blue1) 0%, var(--blue2) 100%);
-  color:#fff;
-  padding:14px 16px;
-  border-bottom: 1px solid rgba(255,255,255,0.15);
-  flex-shrink:0;
-}
-#panel-header h1{
-  margin:0;
-  font-size:17px;
-  font-weight:1000;
-  letter-spacing:-0.3px;
-}
-#panel-header p{
-  margin:6px 0 0 0;
-  font-size:13px;
-  opacity:0.94;
-  line-height:1.35;
-  font-weight:900;
-}
-#header-actions{
-  margin-top:10px;
-  display:flex;
-  gap:8px;
-  align-items:center;
-  flex-wrap:wrap;
-}
-.hbtn{
-  padding:9px 12px;
-  border-radius:12px;
-  border:1px solid rgba(255,255,255,0.35);
-  background: rgba(255,255,255,0.16);
-  color:#fff;
-  font-weight:1000;
-  cursor:pointer;
-  display:inline-flex;
-  gap:8px;
-  align-items:center;
-  user-select:none;
-  font-size:13px;
-}
-.hbtn:active{ transform: translateY(1px); }
-.hbtn.secondary{
-  background: rgba(0,0,0,0.12);
-  border-color: rgba(255,255,255,0.22);
-}
-
-#tabs{
-  display:flex;
-  background:#fafafa;
-  border-bottom:2px solid #e6e6e6;
-  flex-shrink:0;
-  overflow-x:auto;
-}
-.tab{
-  flex:1;
-  padding:11px 10px;
-  text-align:center;
-  cursor:pointer;
-  border-bottom:3px solid transparent;
-  transition:all 0.2s ease;
-  font-size:13px;
-  font-weight:1000;
-  color:#666;
-  user-select:none;
-  white-space:nowrap;
-  min-width:96px;
-}
-.tab:hover{ background:#f2f6ff; color:#2a4c8a; }
-.tab.active{ background:#fff; border-bottom-color: var(--blue1); color: var(--blue1); }
-
-#controls{
-  padding:12px 14px;
-  background:#fafafa;
-  border-bottom:1px solid #e8e8e8;
-  flex-shrink:0;
-}
-.mode-grid{
-  display:grid;
-  grid-template-columns: 1fr 1fr;
-  gap:8px;
-  margin-bottom:10px;
-}
-.mode-btn{
-  padding:11px 10px;
-  border-radius:12px;
-  border:2px solid #e3e3e3;
-  background:#fff;
-  cursor:pointer;
-  font-size:13px;
-  font-weight:1000;
-  color:#444;
-  transition:all 0.15s ease;
-  user-select:none;
-  text-align:center;
-  box-shadow:0 1px 0 rgba(0,0,0,0.02);
-}
-.mode-btn.active{
-  background: var(--blue1);
-  border-color: var(--blue1);
-  color:#fff;
-  box-shadow:0 8px 20px rgba(11,99,206,0.18);
-}
-.mode-btn.full{ grid-column: 1 / -1; }
-.mode-btn.primary{
-  font-size:14px;
-  padding:13px 10px;
-  border-width:3px;
-}
-.mode-btn:disabled{ opacity:0.55; cursor:not-allowed; }
-
-.row2{
-  display:grid;
-  grid-template-columns: 1fr 1fr;
-  gap:12px;
-}
-label{ display:block; font-weight:1000; font-size:13px; color:#333; margin-bottom:6px; }
-input{
-  width:100%;
-  padding:10px 12px;
-  border-radius:12px;
-  border:1px solid #cfcfcf;
-  font-size:14px;
-  background:#fff;
-  font-weight:900;
-  outline:none;
-}
-.hint{ margin-top:6px; font-size:12px; color:#666; font-weight:900; }
-
-#info-content{
-  padding:14px;
-  overflow-y:auto;
-  flex:1;
-  min-height:0;
-  background:#fff;
-}
-
-.tab-content{ display:none; }
-.tab-content.active{ display:block; }
-
-#info-title{
-  font-weight:1000;
-  font-size:16px;
-  margin-bottom:12px;
-  color:#111;
-  padding-bottom:8px;
-  border-bottom:3px solid var(--blue1);
-}
-
-.message{
-  padding:12px 14px;
-  border-radius:12px;
-  margin-bottom:10px;
-  font-size:13.5px;
-  border-right:4px solid;
-  line-height:1.55;
-  font-weight:900;
-}
-.message-info{ background:#e7f3ff; color:#063a73; border-right-color: var(--blue1); }
-.message-warn{ background:#fff7e6; color:#6a3f00; border-right-color:#ffb300; }
-.message-error{ background:#fff0f0; color:#b20000; border-right-color:#ff0000; }
-
-.card{
-  border:1px solid #e8e8e8;
-  border-radius:16px;
-  padding:12px;
-  background:#fff;
-  box-shadow:0 10px 22px rgba(0,0,0,0.06);
-}
-.kpiRow{
-  display:grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap:8px;
-  margin-bottom:10px;
-}
-.kpi{
-  border:1px solid #eee;
-  background:#fafafa;
-  border-radius:14px;
-  padding:10px;
-  text-align:center;
-}
-.kpi-value{
-  font-weight:1000;
-  color: var(--blue1);
-  font-size:14px;
-  margin-bottom:4px;
-}
-.kpi-label{
-  font-size:11px;
-  font-weight:1000;
-  color:#666;
-  letter-spacing:0.2px;
-}
-
-.kvList{ display:grid; gap:8px; }
-.kv{
-  display:grid;
-  grid-template-columns: 160px 1fr;
-  gap:10px;
-  align-items:baseline;
-}
-.k{ color:#666; font-size:12px; font-weight:1000; }
-.v{ font-weight:1000; color:#111; }
-
-.details{ margin-top:8px; }
-.pre{
-  margin:10px 0 0;
-  padding:10px;
-  border-radius:12px;
-  background:#0b1020;
-  color:#e5e7eb;
-  border:1px solid rgba(0,0,0,0.12);
-  overflow:auto;
-  max-height:240px;
-}
-.mono{
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono","Courier New", monospace;
-}
-
-.tips{ margin:0; padding-right:18px; color:#333; font-weight:900; line-height:1.7; }
-
-/* Collapse */
-#info-panel.collapsed{
-  max-height:74px;
-  height:74px;
-}
-#info-panel.collapsed #tabs,
-#info-panel.collapsed #controls,
-#info-panel.collapsed #info-content{
-  display:none;
-}
-#info-panel.collapsed #panel-header{
-  padding:10px 12px;
-}
-#info-panel.collapsed #panel-header p{ display:none; }
-#info-panel.collapsed #panel-header h1{ font-size:15px; }
-#info-panel.collapsed #header-actions{
-  margin-top:0;
-  justify-content:flex-end;
-}
-
-/* Mobile bottom sheet */
-@media (max-width: 768px){
-  #top-searchbar{
-    top:10px;
-    width: calc(100vw - 20px);
-  }
-
-  #info-panel{
-    position: fixed;
-    left: 0;
-    right: 0;
-    top: auto;
-    bottom: 0;
-
-    width: 100%;
-    height: calc(var(--vh, 1vh) * 55);
-    max-height: calc(var(--vh, 1vh) * 55);
-    border-radius: 20px 20px 0 0;
-    overscroll-behavior: contain;
-    touch-action: pan-y;
-  }
-
-  .row2{ grid-template-columns: 1fr; }
-
-  .mode-grid{
-    grid-template-columns: repeat(3, 1fr);
-    gap:6px;
-    margin-bottom:8px;
-  }
-  .mode-btn{ padding:9px 8px; font-size:12px; border-radius:12px; border-width:2px; }
-  .mode-btn.full{ grid-column: auto; }
-  .mode-btn.primary{ font-size:12.5px; padding:9px 8px; border-width:2px; }
-
-  #info-content{
-    padding:10px 10px 16px 10px;
-    overflow-y:auto;
-    -webkit-overflow-scrolling: touch;
-  }
-}
-
-/* MODAL */
-.modal{
-  position: fixed;
-  inset: 0;
-  z-index: 40000;
-}
-.modalOverlay{
-  position:absolute;
-  inset:0;
-  background: rgba(0,0,0,0.45);
-}
-.modalCard{
-  position: relative;
-  width: min(760px, calc(100vw - 26px));
-  max-height: calc(100vh - 26px);
-  margin: 13px auto;
+.iconBtn {
+  border: 1px solid #e5e7eb;
   background: #fff;
-  border-radius: 18px;
-  box-shadow: 0 12px 34px rgba(0,0,0,0.25);
-  overflow: hidden;
-  display:flex;
-  flex-direction:column;
+  border-radius: 10px;
+  padding: 6px 10px;
+  cursor: pointer;
 }
-.modalHeader{
-  padding:14px 16px;
-  border-bottom:1px solid rgba(255,255,255,0.25);
-  display:flex;
-  align-items:center;
-  justify-content:space-between;
-  gap:12px;
-  background: linear-gradient(135deg, var(--blue1) 0%, var(--blue2) 100%);
-  color:#fff;
+
+.box {
+  padding: 12px;
+  border-bottom: 1px solid #f1f5f9;
 }
-.modalHeaderTitle{ font-weight:1000; font-size:15px; }
-.modalClose{
-  border:none;
-  background: rgba(255,255,255,0.18);
-  color:#fff;
-  width:42px;
-  height:42px;
-  border-radius:14px;
-  cursor:pointer;
-  font-size:20px;
-  font-weight:1000;
+
+.row { display: grid; gap: 6px; margin-bottom: 10px; }
+.row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 8px; }
+label { font-size: 12px; opacity: .8; }
+input, select {
+  width: 100%;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  padding: 10px;
+  font-size: 14px;
 }
-.modalClose:active{ transform: translateY(1px); }
-.modalBody{
-  padding:16px;
-  overflow:auto;
+.hint { font-size: 12px; opacity: .65; margin-top: 6px; }
+
+.btn {
+  border: 1px solid #111827;
+  background: #111827;
+  color: #fff;
+  border-radius: 12px;
+  padding: 10px 12px;
+  cursor: pointer;
+}
+.btn:disabled { opacity: .5; cursor: not-allowed; }
+.btn.ghost {
+  background: #fff;
+  color: #111827;
+  border-color: #e5e7eb;
+}
+
+.title2 { font-weight: 800; margin-bottom: 8px; }
+.kv {
+  display: flex;
+  justify-content: space-between;
+  padding: 6px 0;
+  border-bottom: 1px dashed #eef2f7;
+}
+.stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.list { display: grid; gap: 8px; }
+.listItem {
+  text-align: right;
+  border: 1px solid #e5e7eb;
+  background: #fff;
+  border-radius: 14px;
+  padding: 10px;
+  cursor: pointer;
+}
+.listItem.on { border-color: #111827; }
+.liTop { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.liSub { font-size: 12px; opacity: .75; margin-top: 4px; }
+
+.badge {
+  font-size: 11px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid #e5e7eb;
+}
+.bGrey { background: #f3f4f6; }
+.bGreen { background: #e8f5e9; }
+.bOrange { background: #fff3e0; }
+.bRed { background: #ffebee; }
+
+.mapWrap { position: relative; }
+.map { width: 100%; height: 100%; }
+
+.loading {
+  position: absolute;
+  bottom: 16px;
+  right: 16px;
+  background: #111827;
+  color: #fff;
+  padding: 10px 12px;
+  border-radius: 12px;
+  font-size: 13px;
+}
+
+.error {
+  color: #b91c1c;
+  background: #fff5f5;
+}
+@media (max-width: 900px) {
+  .layout { grid-template-columns: 1fr; }
+  .panel { position: absolute; inset: 0 auto 0 0; width: 85vw; max-width: 420px; transform: translateX(-100%); transition: .2s; z-index: 10; }
+  .panel.open { transform: translateX(0); }
 }
 </style>
