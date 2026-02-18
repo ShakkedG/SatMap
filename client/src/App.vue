@@ -9,441 +9,473 @@
         <button class="iconBtn" @click="panelOpen = !panelOpen" title="פתח/סגור">☰</button>
       </div>
 
-      <div class="box">
-        <div class="title2">מקורות</div>
-        <div class="kv"><span>GovMap layer</span><b>{{ BUILDINGS_LAYER }}</b></div>
-        <div class="kv"><span>CSV</span><b dir="ltr">{{ CSV_URL }}</b></div>
-        <div class="kv"><span>שורות נטענו</span><b>{{ csvCount.toLocaleString() }}</b></div>
-        <div class="kv"><span>סטטוס</span><b>{{ csvReady ? "מוכן" : (csvLoading ? "טוען…" : "לא נטען") }}</b></div>
-        <div class="hint" v-if="csvErr">{{ csvErr }}</div>
+      <div class="tabs">
+        <button class="tab" :class="{ on: tab === 'buildings' }" @click="tab = 'buildings'">בניינים</button>
+        <button class="tab" :class="{ on: tab === 'list' }" @click="tab = 'list'">רשימה</button>
+        <button class="tab" :class="{ on: tab === 'about' }" @click="tab = 'about'">איך זה עובד</button>
       </div>
 
-      <div class="box">
-        <div class="title2">חיפוש OBJECTID</div>
-        <div class="row">
-          <input v-model.trim="searchId" placeholder="לדוגמה: 1210580" inputmode="numeric" />
-        </div>
-        <div class="row2">
-          <button class="btn" @click="searchOnMap" :disabled="!mapReady || !searchId">חפש במפה</button>
-          <button class="btn ghost" @click="reloadCsv" :disabled="csvLoading">טען CSV מחדש</button>
-        </div>
-        <div class="hint">
-          טיפ: אם החיפוש לא “תופס”, בדוק שהשם של השדה בשכבה הוא באמת <b>{{ OBJECTID_FIELD }}</b>.
-        </div>
-      </div>
+      <!-- ============== BUILDINGS TAB ============== -->
+      <section v-if="tab === 'buildings'">
+        <div class="box">
+          <div class="row">
+            <label>חיפוש OBJECTID</label>
+            <input v-model.trim="q" placeholder="לדוגמה: 1210580" />
+          </div>
 
-      <div class="box" v-if="selected">
-        <div class="title2">בניין נבחר</div>
+          <div class="row2">
+            <div>
+              <label>סינון סטטוס</label>
+              <select v-model="statusFilter">
+                <option value="">הכל</option>
+                <option value="stable">stable</option>
+                <option value="no_data">no_data</option>
+                <option value="suspect">suspect</option>
+              </select>
+            </div>
 
-        <div class="kv"><span>OBJECTID (מ-GovMap)</span><b>{{ selected.objectId }}</b></div>
+            <div>
+              <label>סף שקיעה (vert_mm ≤)</label>
+              <input type="number" v-model.number="velThreshold" step="0.5" />
+              <div class="hint">לפרוטוטייפ: תנסה ‎-2 או ‎-5</div>
+            </div>
+          </div>
 
-        <div class="sep"></div>
+          <div class="row2">
+            <button class="btn" @click="fitAll" :disabled="!mapReady">התמקד (ברירת מחדל)</button>
+            <button class="btn ghost" @click="reload">טען מחדש CSV</button>
+          </div>
 
-        <div class="title3">InSAR (מה-CSV)</div>
-        <div class="kv">
-          <span>vert_mm</span>
-          <b>{{ selected.insar ? selected.insar.vert_mm : "—" }}</b>
-        </div>
-        <div class="kv">
-          <span>corr_u16</span>
-          <b>{{ selected.insar ? selected.insar.corr_u16 : "—" }}</b>
-        </div>
-        <div class="kv">
-          <span>corr (0–1)</span>
-          <b>{{ selected.insar ? fmtCorr01(selected.insar.corr_u16) : "—" }}</b>
-        </div>
+          <div class="stats">
+            <div>CSV נטען: <b>{{ dbReady ? "כן" : "לא" }}</b></div>
+            <div>רשומות CSV: <b>{{ dbCount.toLocaleString() }}</b></div>
+          </div>
 
-        <div class="sep"></div>
-
-        <div class="title3">שדות מהשכבה (GovMap identify)</div>
-        <div class="fields" v-if="selected.fields?.length">
-          <div class="fieldRow" v-for="(f,i) in selected.fields" :key="i">
-            <span class="fn">{{ f.fieldName }}</span>
-            <b class="fv">{{ f.value ?? "—" }}</b>
+          <div class="hint" v-if="csvUrl">
+            נתיב טעינה: <b>{{ csvUrl }}</b>
           </div>
         </div>
-        <div class="hint" v-else>לא התקבלו שדות נוספים (זה בסדר).</div>
 
-        <div class="row2" style="margin-top:10px;">
-          <button class="btn" @click="highlightSelected" :disabled="!mapReady">סמן במפה</button>
-          <button class="btn ghost" @click="selected = null">נקה</button>
+        <div class="box" v-if="selected">
+          <div class="title2">פרטי בניין נבחר</div>
+
+          <div class="kv"><span>OBJECTID</span><b>{{ selected.OBJECTID ?? "—" }}</b></div>
+          <div class="kv"><span>status</span><b>{{ selected.status ?? "—" }}</b></div>
+
+          <div class="kv"><span>vert_mm</span><b>{{ fmtNum(selected.vert_mm, 3) }}</b></div>
+          <div class="kv"><span>corr_u16</span><b>{{ selected.corr_u16 ?? "—" }}</b></div>
+          <div class="kv"><span>corr (0..1)</span><b>{{ fmtNum(selected.corr01, 4) }}</b></div>
+
+          <div class="row2">
+            <button class="btn" @click="zoomToSelected" :disabled="!mapReady || !selected?.OBJECTID">הדגש/זום לבניין</button>
+            <button class="btn ghost" @click="selected = null">נקה בחירה</button>
+          </div>
+
+          <div class="hint" v-if="selected.mapFields?.length">
+            שדות מה-GovMap (זיהוי קליק):
+            <div class="miniFields">
+              <div class="mf" v-for="(f, i) in selected.mapFields.slice(0, 8)" :key="i">
+                <span>{{ f.fieldName }}</span>
+                <b>{{ f.fieldValue }}</b>
+              </div>
+            </div>
+          </div>
         </div>
-      </div>
 
-      <div class="box error" v-if="mapErr">{{ mapErr }}</div>
+        <div class="box error" v-if="error">
+          {{ error }}
+        </div>
+      </section>
+
+      <!-- ============== LIST TAB ============== -->
+      <section v-else-if="tab === 'list'">
+        <div class="box">
+          <div class="title2">רשימה ({{ filtered.length }})</div>
+
+          <div class="list">
+            <button
+              v-for="item in filtered.slice(0, 250)"
+              :key="item._key"
+              class="listItem"
+              :class="{ on: selected && idEq(selected.OBJECTID, item.OBJECTID) }"
+              @click="selectByObjectId(item.OBJECTID)"
+              :title="`vert_mm=${fmtNum(item.vert_mm, 3)} | status=${item.status}`"
+            >
+              <div class="liTop">
+                <b>#{{ item.OBJECTID ?? "?" }}</b>
+                <span class="badge" :class="badgeClass(item)">{{ item.status || "—" }}</span>
+              </div>
+              <div class="liSub">
+                vert_mm: <b>{{ fmtNum(item.vert_mm, 3) }}</b> · corr: <b>{{ fmtNum(item.corr01, 4) }}</b>
+              </div>
+            </button>
+          </div>
+
+          <div class="hint" v-if="filtered.length > 250">
+            מוצגים 250 ראשונים כדי לא להכביד על הדפדפן.
+          </div>
+        </div>
+
+        <div class="box error" v-if="error">
+          {{ error }}
+        </div>
+      </section>
+
+      <!-- ============== ABOUT TAB ============== -->
+      <section v-else class="box">
+        <div class="title2">איך זה עובד</div>
+        <div class="p">
+          1) האתר טוען קובץ <b>CSV</b> קטן: <b>OBJECTID + vert_mm + corr_u16</b><br />
+          2) במפה נטענת שכבת הבניינים ב-<b>GovMap</b>.<br />
+          3) כשמחפשים/לוחצים בניין → עושים <b>JOIN</b> לפי <b>OBJECTID</b> ומציגים את הנתונים.
+        </div>
+        <div class="p">
+          אם בניין לא נמצא ב-CSV → הוא מוגדר <b>no_data</b>.
+        </div>
+        <div class="hint">
+          אם אתה עדיין מקבל 404 — תפתח בדפדפן את <b>/SatMap/data/tablescv.csv</b> ותבדוק שזה באמת נפתח.
+        </div>
+      </section>
     </aside>
 
     <main class="mapWrap">
+      <!-- GovMap חייב div עם id -->
       <div id="govmap" class="map"></div>
-      <div class="loading" v-if="csvLoading">טוען CSV… (קובץ גדול)</div>
+
+      <div class="legend" v-if="mapReady">
+        <div class="lgRow"><span class="dot red"></span> ≤ -5</div>
+        <div class="lgRow"><span class="dot orange"></span> ≤ -2</div>
+        <div class="lgRow"><span class="dot green"></span> stable</div>
+        <div class="lgRow"><span class="dot grey"></span> no_data</div>
+      </div>
+
+      <div class="loading" v-if="loading">טוען CSV…</div>
     </main>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted, onBeforeUnmount, computed } from "vue";
+import { ref, computed, onMounted, onBeforeUnmount } from "vue";
 
-/** =======================
- *  CONFIG (תעדכן פה)
- *  ======================= */
+/** =========================
+ *  CONFIG — תעדכן רק כאן
+ *  ========================= */
+const GOVMAP_TOKEN = "PUT_YOUR_TOKEN_HERE";   // <-- תדביק את הטוקן שלך
+const BUILDINGS_LAYER_NAME = "225287";        // <-- שם/מזהה השכבה כפי שטענת ב-createMap
+const JOIN_FIELD = "OBJECTID";                // אם בשכבה זה נקרא אחרת—תשנה כאן
 
-// שכבת הבניינים אצלך ב-GovMap (לפי מה ששלחת: 225287)
-const BUILDINGS_LAYER = "225287";
+// מרכז ברירת מחדל (ITM / EPSG:2039 בקירוב). אם לא מתאים—תשנה.
+const DEFAULT_X = 179500;
+const DEFAULT_Y = 663500;
+const DEFAULT_LEVEL = 9;
 
-// שם השדה בשכבה לחיפוש (ברוב שכבות ESRI זה באמת OBJECTID)
-const OBJECTID_FIELD = "OBJECTID";
+// שם הקובץ כפי שהוא נמצא תחת public/data/
+const CSV_FILE = "tablescv.csv";
 
-// טוקן GovMap (מומלץ לשים ב־.env כ־VITE_GOVMAP_TOKEN)
-// אם אין לך בילד/ENV — תשים פה מחרוזת.
-const GOVMAP_TOKEN = import.meta.env.VITE_GOVMAP_TOKEN || "PUT_YOUR_TOKEN_HERE";
+/** ========================= */
 
-/** CSV: שים את הקובץ ב־ public/data/tablescv.csv */
-const CSV_URL = computed(() => {
-  const base = import.meta.env.BASE_URL || "/";
-  return `${base}data/tablescv.csv`;
-});
-
-/** =======================
- *  STATE
- *  ======================= */
 const panelOpen = ref(true);
+const tab = ref("buildings");
+const selected = ref(null);
+
+const q = ref("");
+const statusFilter = ref("");
+const velThreshold = ref(-2);
+
+const loading = ref(false);
+const error = ref("");
 
 const mapReady = ref(false);
-const mapErr = ref("");
+let govmapClickHandler = null;
 
-const csvLoading = ref(false);
-const csvReady = ref(false);
-const csvErr = ref("");
-const csvCount = ref(0);
+const dbReady = ref(false);
+const dbCount = ref(0);
 
-// “DB” בזיכרון: key=OBJECTID, value=packed int32 (vert_mm + corr_u16)
-let insarDB = new Map(); // Map<number, number>
+// Map<OBJECTID:number, {vert_mm:number, corr_u16:number, corr01:number}>
+const db = new Map();
 
-const selected = ref(null); // { objectId, fields, insar }
-const searchId = ref("");
+// רשימה “קלה” להצגה: נשמור רק את ה-N הכי “גרועים” (הכי שליליים) כדי לא להציג מיליון שורות
+const TOP_N = 8000;
+const topWorst = ref([]); // array of items
 
-/** =======================
- *  GOVMAP LOADER
- *  ======================= */
-function ensureGovMapScript() {
-  return new Promise((resolve, reject) => {
-    if (window.govmap) return resolve();
+const csvUrl = computed(() => {
+  const base = import.meta.env.BASE_URL || "/";
+  return `${base}data/${CSV_FILE}`;
+});
 
-    const existing = document.querySelector('script[data-govmap="1"]');
-    if (existing) {
-      existing.addEventListener("load", () => resolve());
-      existing.addEventListener("error", () => reject(new Error("GovMap script failed")));
-      return;
+function fmtNum(v, digits = 3) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return "—";
+  return n.toFixed(digits);
+}
+
+function idEq(a, b) {
+  const na = Number(a);
+  const nb = Number(b);
+  if (Number.isFinite(na) && Number.isFinite(nb)) return na === nb;
+  return String(a ?? "") === String(b ?? "");
+}
+
+function statusOf(vert) {
+  const v = Number(vert);
+  if (!Number.isFinite(v)) return "no_data";
+  if (v <= -2) return "suspect";
+  return "stable";
+}
+
+function badgeClass(item) {
+  const v = Number(item.vert_mm);
+  if (!Number.isFinite(v)) return "bGrey";
+  if (v <= -5) return "bRed";
+  if (v <= -2) return "bOrange";
+  return "bGreen";
+}
+
+function normItemFromDb(objectId) {
+  const oid = Number(objectId);
+  const rec = db.get(oid);
+  if (!rec) {
+    return {
+      _key: `oid_${oid}`,
+      OBJECTID: oid,
+      status: "no_data",
+      vert_mm: null,
+      corr_u16: null,
+      corr01: null,
+    };
+  }
+  return {
+    _key: `oid_${oid}`,
+    OBJECTID: oid,
+    status: statusOf(rec.vert_mm),
+    vert_mm: rec.vert_mm,
+    corr_u16: rec.corr_u16,
+    corr01: rec.corr01,
+  };
+}
+
+const filtered = computed(() => {
+  // אם יש חיפוש—נחזיר רק תוצאה אחת מדויקת (לא צריך לסרוק רשימה ענקית)
+  if (q.value) {
+    const oid = Number(q.value);
+    if (!Number.isFinite(oid)) return [];
+    return [normItemFromDb(oid)];
+  }
+
+  let arr = topWorst.value;
+
+  if (statusFilter.value) {
+    arr = arr.filter((it) => it.status === statusFilter.value);
+  }
+
+  const thr = Number(velThreshold.value);
+  if (Number.isFinite(thr)) {
+    arr = arr.filter((it) => {
+      const v = Number(it.vert_mm);
+      if (!Number.isFinite(v)) return true;
+      return v <= thr;
+    });
+  }
+
+  // הכי שליליים למעלה
+  return [...arr].sort((a, b) => (Number(a.vert_mm) || 0) - (Number(b.vert_mm) || 0));
+});
+
+/** -------- CSV loader (כולל תמיכה בפסיק/נקודה-פסיק) -------- */
+async function loadCsvIntoDb() {
+  loading.value = true;
+  error.value = "";
+  dbReady.value = false;
+  dbCount.value = 0;
+  db.clear();
+  topWorst.value = [];
+
+  try {
+    const res = await fetch(csvUrl.value, { cache: "no-store" });
+    if (!res.ok) throw new Error(`CSV load failed (${res.status}) — בדוק שהקובץ נמצא ב: ${csvUrl.value}`);
+
+    const text = await res.text();
+    const lines = text.split(/\r?\n/).filter(Boolean);
+    if (lines.length < 2) throw new Error("CSV ריק או בלי נתונים");
+
+    const header = lines[0];
+    const delim = header.includes(";") && !header.includes(",") ? ";" : ",";
+
+    const cols = header.split(delim).map((s) => s.trim().replace(/^"|"$/g, ""));
+    const idxOid = cols.findIndex((c) => c.toUpperCase() === "OBJECTID");
+    const idxVert = cols.findIndex((c) => c.toLowerCase() === "vert_mm" || c.toLowerCase() === "vert");
+    const idxCorr = cols.findIndex((c) => c.toLowerCase() === "corr_u16" || c.toLowerCase() === "corr");
+
+    if (idxOid < 0) throw new Error("לא מצאתי עמודה OBJECTID בכותרת ה-CSV");
+    if (idxVert < 0) throw new Error("לא מצאתי עמודה vert_mm (או vert) בכותרת ה-CSV");
+    if (idxCorr < 0) throw new Error("לא מצאתי עמודה corr_u16 (או corr) בכותרת ה-CSV");
+
+    // פרסור
+    for (let i = 1; i < lines.length; i++) {
+      const row = lines[i].split(delim);
+      const oid = Number(row[idxOid]);
+      if (!Number.isFinite(oid)) continue;
+
+      const vert = Number(row[idxVert]);
+      const corrU16 = Number(row[idxCorr]);
+      const corr01 = Number.isFinite(corrU16) ? corrU16 / 65535 : null;
+
+      db.set(oid, { vert_mm: Number.isFinite(vert) ? vert : null, corr_u16: Number.isFinite(corrU16) ? corrU16 : null, corr01 });
+
+      // topWorst (הכי שליליים)
+      if (Number.isFinite(vert)) {
+        const item = {
+          _key: `oid_${oid}`,
+          OBJECTID: oid,
+          status: statusOf(vert),
+          vert_mm: vert,
+          corr_u16: Number.isFinite(corrU16) ? corrU16 : null,
+          corr01,
+        };
+
+        // נכניס אם יש מקום או אם הוא “גרוע” יותר מהאחרון
+        const arr = topWorst.value;
+        if (arr.length < TOP_N) {
+          arr.push(item);
+        } else {
+          // נמצא את הכי “יציב” (הכי גבוה) ברשימת הגרועים ונחליף אם צריך
+          let maxIdx = 0;
+          let maxVal = Number(arr[0].vert_mm);
+          for (let j = 1; j < arr.length; j++) {
+            const v = Number(arr[j].vert_mm);
+            if (v > maxVal) {
+              maxVal = v;
+              maxIdx = j;
+            }
+          }
+          if (vert < maxVal) arr[maxIdx] = item;
+        }
+      }
     }
 
+    dbCount.value = db.size;
+    dbReady.value = true;
+
+    // אם המשתמש כבר הקליד OBJECTID
+    if (q.value) {
+      const oid = Number(q.value);
+      if (Number.isFinite(oid)) selected.value = normItemFromDb(oid);
+    }
+  } catch (e) {
+    error.value = e?.message || String(e);
+  } finally {
+    loading.value = false;
+  }
+}
+
+/** -------- GovMap script + map -------- */
+function loadGovmapScript() {
+  return new Promise((resolve, reject) => {
+    if (window.govmap) return resolve();
     const s = document.createElement("script");
     s.src = "https://www.govmap.gov.il/govmap/api/govmap.api.js";
-    s.async = true;
-    s.dataset.govmap = "1";
+    s.defer = true;
     s.onload = () => resolve();
-    s.onerror = () => reject(new Error("GovMap script failed to load"));
+    s.onerror = () => reject(new Error("לא הצלחתי לטעון govmap.api.js"));
     document.head.appendChild(s);
   });
 }
 
 function initGovMap() {
-  mapErr.value = "";
-  try {
-    // יצירת מפה + טעינת שכבה
-    window.govmap.createMap("govmap", {
-      token: GOVMAP_TOKEN,
-      layers: [BUILDINGS_LAYER],
-      showXY: false,
-      identifyOnClick: false,
-      background: 3,
-      zoomButtons: true,
-    });
+  const gm = window.govmap;
+  if (!gm) throw new Error("govmap לא נטען");
 
-    mapReady.value = true;
+  gm.createMap("govmap", {
+    token: GOVMAP_TOKEN,
+    layers: [BUILDINGS_LAYER_NAME],
+    showXY: false,
+    identifyOnClick: false,
+    isEmbeddedToggle: false,
+    background: "1",
+    layersMode: 1,
+    zoomButtons: true,
+    level: DEFAULT_LEVEL,
+  });
 
-    // קליק במפה → Identify רק על שכבת הבניינים
-    window.govmap
-      .onEvent(window.govmap.events.CLICK)
-      .progress(async (e) => {
-        const p = e?.mapPoint;
-        if (!p || !Number.isFinite(p.x) || !Number.isFinite(p.y)) return;
+  // קליק על מפה -> identify -> join
+  govmapClickHandler = async (e) => {
+    try {
+      const x = e?.mapPoint?.x;
+      const y = e?.mapPoint?.y;
+      if (!Number.isFinite(x) || !Number.isFinite(y)) return;
 
-        const oid = await identifyObjectId(p.x, p.y);
-        if (!oid) return;
+      const resp = await gm.identifyByXYAndLayer(x, y, [BUILDINGS_LAYER_NAME]);
+      const layer = resp?.data?.[0];
+      const ent = layer?.entities?.[0];
+      if (!ent) return;
 
-        const insar = getInsarByObjectId(oid);
+      // 1) ננסה לקחת objectId (לעיתים הוא זהה ל-OBJECTID)
+      let oid = Number(ent.objectId);
 
-        selected.value = {
-          objectId: oid,
-          fields: lastIdentifyFields.value,
-          insar,
-        };
+      // 2) אם יש שדה OBJECTID בתוך fields — נעדיף אותו
+      const f = (ent.fields || []).find((ff) => {
+        const n = String(ff.fieldName || ff.fieldDisplay || "").toUpperCase();
+        return n.includes(JOIN_FIELD);
       });
-  } catch (err) {
-    mapErr.value = err?.message || String(err);
-    mapReady.value = false;
-  }
-}
+      if (f && Number.isFinite(Number(f.fieldValue))) oid = Number(f.fieldValue);
 
-/** =======================
- *  IDENTIFY + JOIN
- *  ======================= */
-
-// נשמור את השדות האחרונים שקיבלנו מה־identify (להצגה)
-const lastIdentifyFields = ref([]);
-
-async function identifyObjectId(x2039, y2039) {
-  lastIdentifyFields.value = [];
-
-  try {
-    const res = await window.govmap.identifyByXYAndLayer(x2039, y2039, [BUILDINGS_LAYER]);
-    const data = res?.data || [];
-
-    // מחפש את הרשומה של השכבה שלנו
-    const layerHit =
-      data.find((d) => String(d.layerName).toLowerCase() === String(BUILDINGS_LAYER).toLowerCase()) ||
-      data[0];
-
-    const ent = layerHit?.entities?.[0];
-    if (!ent) return null;
-
-    // ברוב שכבות ESRI: objectId זה ה־OBJECTID
-    const oid = Number(ent.objectId);
-    if (!Number.isFinite(oid)) return null;
-
-    // שדות להצגה (לא חובה)
-    if (Array.isArray(ent.fields)) lastIdentifyFields.value = ent.fields;
-
-    return oid;
-  } catch {
-    return null;
-  }
-}
-
-// packing כדי לחסוך זיכרון: [vert_mm:int16 | corr_u16:uint16]
-function packInsar(vert_mm, corr_u16) {
-  const v = (Number(vert_mm) | 0) & 0xffff;
-  const c = (Number(corr_u16) | 0) & 0xffff;
-  return (v << 16) | c;
-}
-
-function unpackInsar(packed) {
-  const vert_mm = packed >> 16; // signed
-  const corr_u16 = packed & 0xffff;
-  return { vert_mm, corr_u16 };
-}
-
-function getInsarByObjectId(objectId) {
-  const packed = insarDB.get(Number(objectId));
-  if (packed === undefined) return null;
-  return unpackInsar(packed);
-}
-
-function fmtCorr01(corr_u16) {
-  const n = Number(corr_u16);
-  if (!Number.isFinite(n)) return "—";
-  return (n / 65535).toFixed(4);
-}
-
-/** =======================
- *  SEARCH / HIGHLIGHT
- *  ======================= */
-async function searchOnMap() {
-  if (!mapReady.value) return;
-  const oid = Number(searchId.value);
-  if (!Number.isFinite(oid)) return;
-
-  // גם אם אין נתוני InSAR — עדיין נסמן במפה
-  try {
-    await window.govmap.searchInLayer({
-      layerName: BUILDINGS_LAYER,
-      fieldName: OBJECTID_FIELD,
-      fieldValues: [String(oid)],
-      exactSearch: true,
-      zoomToResults: true,
-      clearExistingResults: true,
-      showBubble: true,
-    });
-
-    const insar = getInsarByObjectId(oid);
-    selected.value = { objectId: oid, fields: selected.value?.fields || [], insar };
-  } catch (e) {
-    mapErr.value = e?.message || String(e);
-  }
-}
-
-async function highlightSelected() {
-  if (!mapReady.value || !selected.value?.objectId) return;
-  searchId.value = String(selected.value.objectId);
-  await searchOnMap();
-}
-
-/** =======================
- *  CSV LOADER (stream)
- *  ======================= */
-function detectDelimiter(headerLine) {
-  const comma = (headerLine.match(/,/g) || []).length;
-  const semi = (headerLine.match(/;/g) || []).length;
-  return semi > comma ? ";" : ",";
-}
-
-async function loadCsv() {
-  csvLoading.value = true;
-  csvReady.value = false;
-  csvErr.value = "";
-  csvCount.value = 0;
-  insarDB = new Map();
-
-  try {
-    const res = await fetch(CSV_URL.value, { cache: "no-store" });
-    if (!res.ok) throw new Error(`CSV load failed (${res.status})`);
-
-    // אם אין streaming, נופלים ל־text()
-    if (!res.body || !res.body.getReader) {
-      const text = await res.text();
-      parseCsvText(text);
-      csvReady.value = true;
-      return;
+      const item = normItemFromDb(oid);
+      item.mapFields = ent.fields || [];
+      selected.value = item;
+      tab.value = "buildings";
+    } catch (err) {
+      // לא מפיל את האפליקציה
     }
+  };
 
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder("utf-8");
-    let buf = "";
-    let headerParsed = false;
-    let delim = ",";
-    let idxOID = -1, idxVert = -1, idxCorr = -1;
+  gm.onEvent(gm.events.CLICK, govmapClickHandler);
+  mapReady.value = true;
 
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-
-      buf += decoder.decode(value, { stream: true });
-
-      let nl;
-      while ((nl = buf.indexOf("\n")) >= 0) {
-        let line = buf.slice(0, nl);
-        buf = buf.slice(nl + 1);
-
-        line = line.replace(/\r$/, "");
-        if (!line) continue;
-
-        if (!headerParsed) {
-          // header
-          const hdr = line.replace(/^\uFEFF/, "");
-          delim = detectDelimiter(hdr);
-          const cols = hdr.split(delim).map((s) => s.trim());
-
-          idxVert = cols.findIndex((c) => c.toLowerCase() === "vert_mm");
-          idxCorr = cols.findIndex((c) => c.toLowerCase() === "corr_u16");
-          idxOID = cols.findIndex((c) => c.toLowerCase() === "objectid");
-
-          if (idxOID < 0) throw new Error("לא מצאתי עמודה OBJECTID ב־CSV");
-          if (idxVert < 0) idxVert = 0; // fallback
-          if (idxCorr < 0) idxCorr = 1; // fallback
-
-          headerParsed = true;
-          continue;
-        }
-
-        const parts = line.split(delim);
-        const oid = Number(parts[idxOID]);
-        if (!Number.isFinite(oid)) continue;
-
-        const vertRaw = (parts[idxVert] ?? "").trim();
-        const corrRaw = (parts[idxCorr] ?? "").trim();
-
-        if (vertRaw === "" || vertRaw.toLowerCase() === "null") continue; // כמו שביקשת: בלי נתונים → לא נכנס ל־DB
-
-        const vert = Number(vertRaw);
-        const corr = Number(corrRaw);
-
-        if (!Number.isFinite(vert)) continue;
-
-        // corr יכול להיות ריק — נשים 0
-        const corrU16 = Number.isFinite(corr) ? corr : 0;
-
-        insarDB.set(oid, packInsar(vert, corrU16));
-        csvCount.value++;
-      }
-    }
-
-    // שארית אחרונה בלי \n
-    const last = buf.replace(/\r$/, "").trim();
-    if (last && headerParsed) {
-      const parts = last.split(delim);
-      const oid = Number(parts[idxOID]);
-      if (Number.isFinite(oid)) {
-        const vertRaw = (parts[idxVert] ?? "").trim();
-        const corrRaw = (parts[idxCorr] ?? "").trim();
-        if (vertRaw && vertRaw.toLowerCase() !== "null") {
-          const vert = Number(vertRaw);
-          const corr = Number(corrRaw);
-          if (Number.isFinite(vert)) {
-            const corrU16 = Number.isFinite(corr) ? corr : 0;
-            insarDB.set(oid, packInsar(vert, corrU16));
-            csvCount.value++;
-          }
-        }
-      }
-    }
-
-    csvReady.value = true;
-  } catch (e) {
-    csvErr.value = e?.message || String(e);
-  } finally {
-    csvLoading.value = false;
-  }
+  // התמקדות ראשונית
+  gm.zoomToXY(DEFAULT_X, DEFAULT_Y, DEFAULT_LEVEL);
 }
 
-function parseCsvText(text) {
-  const lines = text.split(/\r?\n/).filter(Boolean);
-  if (!lines.length) return;
-
-  const header = lines[0].replace(/^\uFEFF/, "");
-  const delim = detectDelimiter(header);
-  const cols = header.split(delim).map((s) => s.trim().toLowerCase());
-
-  const idxVert = cols.indexOf("vert_mm");
-  const idxCorr = cols.indexOf("corr_u16");
-  const idxOID = cols.indexOf("objectid");
-  if (idxOID < 0) throw new Error("לא מצאתי עמודה OBJECTID ב־CSV");
-
-  for (let i = 1; i < lines.length; i++) {
-    const parts = lines[i].split(delim);
-    const oid = Number(parts[idxOID]);
-    if (!Number.isFinite(oid)) continue;
-
-    const vertRaw = (parts[idxVert] ?? "").trim();
-    const corrRaw = (parts[idxCorr] ?? "").trim();
-    if (!vertRaw || vertRaw.toLowerCase() === "null") continue;
-
-    const vert = Number(vertRaw);
-    const corr = Number(corrRaw);
-    if (!Number.isFinite(vert)) continue;
-
-    const corrU16 = Number.isFinite(corr) ? corr : 0;
-    insarDB.set(oid, packInsar(vert, corrU16));
-    csvCount.value++;
-  }
+function fitAll() {
+  if (!mapReady.value || !window.govmap) return;
+  window.govmap.zoomToXY(DEFAULT_X, DEFAULT_Y, DEFAULT_LEVEL);
 }
 
-async function reloadCsv() {
-  await loadCsv();
+async function zoomToSelected() {
+  if (!mapReady.value || !window.govmap || !selected.value?.OBJECTID) return;
+
+  // highlight + zoom ע"י חיפוש לפי שדה
+  await window.govmap.searchInLayer({
+    layerName: BUILDINGS_LAYER_NAME,
+    fieldName: JOIN_FIELD,
+    fieldValues: [String(selected.value.OBJECTID)],
+    highlight: true,
+    showBubble: false,
+    zoomToResults: true,
+    clearExisting: true,
+  });
 }
 
-/** =======================
- *  LIFECYCLE
- *  ======================= */
+async function selectByObjectId(objectId) {
+  const item = normItemFromDb(objectId);
+  selected.value = item;
+  tab.value = "buildings";
+  await zoomToSelected();
+}
+
+async function reload() {
+  await loadCsvIntoDb();
+}
+
 onMounted(async () => {
-  await loadCsv();
-  await ensureGovMapScript();
+  await loadCsvIntoDb();
+  await loadGovmapScript();
   initGovMap();
 });
 
 onBeforeUnmount(() => {
   try {
-    // אין destroy רשמי בדוקומנטציה, אז רק מנקים state
-    mapReady.value = false;
+    const gm = window.govmap;
+    if (gm && govmapClickHandler) gm.removeEvent(gm.events.CLICK, govmapClickHandler);
   } catch {}
 });
 </script>
@@ -487,24 +519,49 @@ onBeforeUnmount(() => {
   cursor: pointer;
 }
 
+.tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid #f1f5f9;
+  background: #fff;
+  position: sticky;
+  top: 56px;
+  z-index: 4;
+}
+.tab {
+  border: 1px solid #e5e7eb;
+  background: #fff;
+  border-radius: 999px;
+  padding: 8px 10px;
+  cursor: pointer;
+  font-size: 13px;
+}
+.tab.on {
+  border-color: #111827;
+  background: #111827;
+  color: #fff;
+}
+
 .box {
   padding: 12px;
   border-bottom: 1px solid #f1f5f9;
 }
 
-.title2 { font-weight: 900; margin-bottom: 8px; }
-.title3 { font-weight: 800; margin: 8px 0; font-size: 13px; opacity: .9; }
+.row { display: grid; gap: 6px; margin-bottom: 10px; }
+.row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 8px; }
+label { font-size: 12px; opacity: .8; }
 
-.row { display: grid; gap: 8px; }
-.row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; }
-
-input {
+input, select {
   width: 100%;
   border: 1px solid #e5e7eb;
   border-radius: 12px;
   padding: 10px;
   font-size: 14px;
 }
+
+.hint { font-size: 12px; opacity: .65; margin-top: 6px; }
 
 .btn {
   border: 1px solid #111827;
@@ -522,32 +579,67 @@ input {
   border-color: #e5e7eb;
 }
 
+.title2 { font-weight: 900; margin-bottom: 8px; }
 .kv {
   display: flex;
   justify-content: space-between;
-  gap: 12px;
   padding: 6px 0;
   border-bottom: 1px dashed #eef2f7;
 }
-.kv span { opacity: .75; }
 
-.sep { height: 1px; background: #eef2f7; margin: 10px 0; }
-
-.hint { font-size: 12px; opacity: .7; margin-top: 8px; }
-
-.fields { display: grid; gap: 6px; }
-.fieldRow {
-  display: flex;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 6px 0;
-  border-bottom: 1px dashed #eef2f7;
+.stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  font-size: 13px;
 }
-.fn { font-size: 12px; opacity: .75; }
-.fv { font-size: 12px; }
+
+.list { display: grid; gap: 8px; }
+.listItem {
+  text-align: right;
+  border: 1px solid #e5e7eb;
+  background: #fff;
+  border-radius: 14px;
+  padding: 10px;
+  cursor: pointer;
+}
+.listItem.on { border-color: #111827; }
+
+.liTop { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.liSub { font-size: 12px; opacity: .75; margin-top: 4px; }
+
+.badge {
+  font-size: 11px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid #e5e7eb;
+}
+.bGrey { background: #f3f4f6; }
+.bGreen { background: #e8f5e9; }
+.bOrange { background: #fff3e0; }
+.bRed { background: #ffebee; }
 
 .mapWrap { position: relative; }
 .map { width: 100%; height: 100%; }
+
+.legend {
+  position: absolute;
+  left: 16px;
+  bottom: 16px;
+  background: rgba(255,255,255,.95);
+  border: 1px solid #e5e7eb;
+  border-radius: 14px;
+  padding: 10px 12px;
+  font-size: 12px;
+  box-shadow: 0 10px 20px rgba(0,0,0,.08);
+  z-index: 20;
+}
+.lgRow { display: flex; align-items: center; gap: 8px; margin: 4px 0; }
+.dot { width: 10px; height: 10px; border-radius: 999px; display: inline-block; }
+.dot.red { background: #e53935; }
+.dot.orange { background: #fb8c00; }
+.dot.green { background: #43a047; }
+.dot.grey { background: #9aa0a6; }
 
 .loading {
   position: absolute;
@@ -558,12 +650,18 @@ input {
   padding: 10px 12px;
   border-radius: 12px;
   font-size: 13px;
+  z-index: 20;
 }
 
 .error {
   color: #b91c1c;
   background: #fff5f5;
 }
+
+.p { font-size: 13px; line-height: 1.6; margin: 8px 0; }
+
+.miniFields { margin-top: 8px; display: grid; gap: 6px; }
+.mf { display: flex; justify-content: space-between; gap: 10px; font-size: 12px; padding: 6px 8px; border: 1px dashed #eef2f7; border-radius: 10px; }
 
 @media (max-width: 900px) {
   .layout { grid-template-columns: 1fr; }
@@ -574,7 +672,7 @@ input {
     max-width: 420px;
     transform: translateX(-100%);
     transition: .2s;
-    z-index: 10;
+    z-index: 30;
   }
   .panel.open { transform: translateX(0); }
 }
