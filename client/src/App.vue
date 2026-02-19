@@ -5,7 +5,7 @@
         <div class="titles">
           <div class="appTitle">SatMap – Buildings + Join</div>
           <div class="appSub">
-            GovMap בניינים + JOIN לנתוני בניינים (API שלך) + סימון תנועה חריגה
+            GovMap בניינים + JOIN לנתוני בניינים (CSV/JSON/API) + סימון תנועה חריגה
           </div>
         </div>
         <button class="iconBtn" @click="panelOpen = !panelOpen" :title="panelOpen ? 'סגור' : 'פתח'">
@@ -138,10 +138,10 @@
           <div class="v">{{ formatRate(selected.movement?.rate_mm_yr) }}</div>
 
           <div class="k">האם חריג</div>
-          <div class="v">{{ selected.isAnomaly ? 'כן' : 'לא' }}</div>
+          <div class="v">{{ selected.isAnomaly ? "כן" : "לא" }}</div>
 
           <div class="k">מקור נתונים</div>
-          <div class="v">{{ selected.movement?.source || '—' }}</div>
+          <div class="v">{{ selected.movement?.source || "—" }}</div>
         </div>
       </section>
 
@@ -150,7 +150,7 @@
         <div class="muted small">
           1) שנה למעלה את <b>BUILDINGS_LAYER</b> לשם/מספר השכבה שלך ב־GovMap.<br />
           2) שנה את <b>BUILDING_ID_FIELD</b> לשם השדה שמזהה בניין בשכבה (למשל ID / BLDG_ID / OBJECTID).<br />
-          3) שנה את <b>BUILDING_DATA_URL</b> ל־API/JSON של האתר הקודם שלך שמחזיר נתוני תנועה לפי ID.
+          3) הנתונים שלך כרגע מגיעים מ־CSV: <b>public/data/tablecsv.csv</b> (לא building_data.json).
         </div>
       </section>
     </aside>
@@ -166,44 +166,39 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 
 /**
  * =========================
- *  CONFIG – תתאים אליך
+ *  CONFIG
  * =========================
  */
 
-// מומלץ: לשים ב-.env:  VITE_GOVMAP_TOKEN=xxxx
+// טוקן GovMap
 const GOVMAP_TOKEN = "ede9a5fd-7c23-432f-8ffb-d85feffa3f3c";
 
-// שכבת הבניינים שלך ב־GovMap (אצלך דיברנו בעבר על 225287)
+// שכבת הבניינים שלך ב־GovMap
 const BUILDINGS_LAYER = "225287";
 
-// שם השדה בשכבת הבניינים שמייצג מזהה יציב לבניין (תתאים למה שיש אצלך בשכבה)
+// שם השדה בשכבת הבניינים שמייצג מזהה לבניין (ה־JOIN key)
 const BUILDING_ID_FIELD = "ID";
 
-// URL לנתוני בניינים (מה־API של crimesmap/האתר הקודם שלך)
-// אפשר גם לשים קובץ ב-public למשל: /building_data.json
-const BUILDING_DATA_URL = new URL("building_data.json", import.meta.env.BASE_URL).toString();
-
+/**
+ * הנתונים שלך נמצאים כאן:
+ * client/public/data/tablecsv.csv
+ * לכן ב-build זה יהיה: <BASE_URL>/data/tablecsv.csv
+ */
+const BUILDING_DATA_URL = new URL("data/tablecsv.csv", import.meta.env.BASE_URL).toString();
 
 /**
- * איך נראה רשומת נתוני בניין מה־API?
- * ברירת מחדל שמקובל:
- *   { id: "123", rate_mm_yr: -3.2, last_date: "2026-01-10", ... }
- *
- * אם אצלך השמות שונים – תעדכן כאן:
+ * אם אתה יודע בוודאות את שמות העמודות ב-CSV — תוכל לשים כאן.
+ * אם תשאיר ריק, הקוד ינסה לזהות אוטומטית.
  */
-const BUILDING_DATA_ID_FIELD = "id";
-const BUILDING_DATA_RATE_FIELD = "rate_mm_yr";
-const BUILDING_DATA_DATE_FIELD = "last_date";
+const CSV_ID_COL_HINT = ""; // לדוגמה: "ID" / "building_id"
+const CSV_RATE_COL_HINT = ""; // לדוגמה: "rate_mm_yr" / "v"
+const CSV_DATE_COL_HINT = ""; // לדוגמה: "last_date"
 
 /**
  * ביצועים: לא לצייר אלפי פוליגונים בבת אחת
  */
 const MAX_DRAW_ANOMALIES = 600;
 const MAX_DRAW_NORMALS = 600;
-
-/**
- * GovMap עובד ברשת ישראל החדשה (EPSG:2039) – זו גם התשובה של האירועים והשרטוטים.
- */
 
 /* =========================
  *  STATE
@@ -221,10 +216,10 @@ const autoRefresh = ref(false);
 const addressQuery = ref("");
 const lastQueryWkt = ref("");
 
-const buildings = ref([]); // כל הבניינים שקיבלנו מהשאילתה (אחרי JOIN)
+const buildings = ref([]); // בניינים מה-GovMap אחרי JOIN
 const selected = ref(null);
 
-/* Index לנתוני בניינים מה-API: joinKey -> movement */
+/* Index: joinKey -> movement */
 const movementIndex = ref(new Map());
 
 /* =========================
@@ -246,7 +241,6 @@ function loadGovMapScript() {
     if (window.govmap) return resolve();
     const id = "govmap-api-js";
     if (document.getElementById(id)) {
-      // מישהו כבר הוסיף – נחכה
       const t = setInterval(() => {
         if (window.govmap) {
           clearInterval(t);
@@ -277,11 +271,10 @@ async function initGovMap() {
   errorMsg.value = "";
   await loadGovMapScript();
 
-if (!GOVMAP_TOKEN) {
-  throw new Error("חסר GOVMAP_TOKEN. שים טוקן אמיתי ב-.env או בקוד.");
-}
+  if (!GOVMAP_TOKEN) {
+    throw new Error("חסר GOVMAP_TOKEN.");
+  }
 
-  // יצירת המפה (הגדרות בסיס)
   window.govmap.createMap("map", {
     token: GOVMAP_TOKEN,
     background: 3,
@@ -299,7 +292,6 @@ if (!GOVMAP_TOKEN) {
     },
   });
 
-  // אירועים: אם בחרת auto-refresh, נטען לפי תחום התצוגה
   window.govmap.onEvent(window.govmap.events.EXTENT_CHANGE).progress(async (e) => {
     if (!autoRefresh.value) return;
     const extent = e?.extent;
@@ -321,38 +313,140 @@ onBeforeUnmount(() => {
 });
 
 /* =========================
- *  API: Building data (CrimesMap / previous site)
+ *  DATA LOADER (CSV)
  * ========================= */
 async function reloadBuildingData() {
   loadingData.value = true;
   errorMsg.value = "";
+
   try {
     const res = await fetch(BUILDING_DATA_URL, { cache: "no-store" });
-    if (!res.ok) throw new Error(`BUILDING_DATA_URL נכשל (${res.status})`);
-    const raw = await res.json();
 
-    // תומך גם ב: {data:[...]} וגם במערך ישיר
-    const rows = Array.isArray(raw) ? raw : Array.isArray(raw?.data) ? raw.data : [];
+    // אם אין קובץ (בזמן פיתוח/דיפלוי) — לא להפיל
+    if (res.status === 404) {
+      movementIndex.value = new Map();
+      return;
+    }
+    if (!res.ok) throw new Error(`BUILDING_DATA_URL נכשל (${res.status})`);
+
+    // Streaming parse כדי להתמודד עם קובץ גדול
+    const reader = res.body?.getReader?.();
+    if (!reader) {
+      // fallback: טקסט מלא
+      const text = await res.text();
+      movementIndex.value = parseCsvToIndex(text);
+      if (buildings.value.length) {
+        buildings.value = buildings.value.map((b) => applyJoinAndAnomaly(b));
+        await redrawOverlays();
+      }
+      return;
+    }
+
+    const decoder = new TextDecoder("utf-8");
+    let buf = "";
+    let headers = null;
+    let delim = ",";
+    let idIdx = -1;
+    let rateIdx = -1;
+    let dateIdx = -1;
+
     const idx = new Map();
 
-    for (const r of rows) {
-      const id = String(r?.[BUILDING_DATA_ID_FIELD] ?? "").trim();
-      if (!id) continue;
+    const pickAndSetIndices = (hdrs) => {
+      headers = hdrs;
 
-      const rate = toNumberSafe(r?.[BUILDING_DATA_RATE_FIELD]);
-      const lastDate = r?.[BUILDING_DATA_DATE_FIELD] ? String(r[BUILDING_DATA_DATE_FIELD]) : "";
+      const idCandidates = [
+        "id",
+        "building_id",
+        "bldg_id",
+        "bldgid",
+        "blgd_id",
+        "objectid",
+        "OBJECTID",
+        "ID",
+      ];
+      const rateCandidates = [
+        "rate_mm_yr",
+        "rate",
+        "velocity",
+        "vel",
+        "v",
+        "mm_yr",
+        "mm/yr",
+        "subsidence",
+        "sink_rate",
+      ];
+      const dateCandidates = ["last_date", "date", "last", "timestamp", "time"];
+
+      const idCol = CSV_ID_COL_HINT ? pickHeaderFuzzy(headers, [CSV_ID_COL_HINT]) : pickHeaderFuzzy(headers, idCandidates);
+      const rateCol = CSV_RATE_COL_HINT
+        ? pickHeaderFuzzy(headers, [CSV_RATE_COL_HINT])
+        : pickHeaderFuzzy(headers, rateCandidates);
+      const dateCol = CSV_DATE_COL_HINT
+        ? pickHeaderFuzzy(headers, [CSV_DATE_COL_HINT])
+        : pickHeaderFuzzy(headers, dateCandidates);
+
+      if (!idCol || !rateCol) {
+        const sample = headers.slice(0, 60).join(", ");
+        throw new Error(
+          `לא הצלחתי לזהות עמודות ב-CSV (צריך לפחות ID + RATE).\n` +
+            `כותרות (חלקי): ${sample}\n` +
+            `אם אתה יודע את השמות: תגדיר CSV_ID_COL_HINT ו-CSV_RATE_COL_HINT.`
+        );
+      }
+
+      idIdx = headers.findIndex((h) => sameHeader(h, idCol));
+      rateIdx = headers.findIndex((h) => sameHeader(h, rateCol));
+      dateIdx = dateCol ? headers.findIndex((h) => sameHeader(h, dateCol)) : -1;
+    };
+
+    const processLine = (line) => {
+      if (!line) return;
+
+      if (!headers) {
+        const commaCount = (line.match(/,/g) || []).length;
+        const semiCount = (line.match(/;/g) || []).length;
+        delim = semiCount > commaCount ? ";" : ",";
+        const hdrs = parseCsvLine(line, delim).map((h) => h.trim()).filter(Boolean);
+        pickAndSetIndices(hdrs);
+        return;
+      }
+
+      const row = parseCsvLine(line, delim);
+      if (!row || row.length <= Math.max(idIdx, rateIdx)) return;
+
+      const id = String(row[idIdx] ?? "").trim();
+      if (!id) return;
+
+      const rate = toNumberSafe(row[rateIdx]);
+      if (rate === null) return;
+
+      const lastDate = dateIdx >= 0 ? String(row[dateIdx] ?? "").trim() : "";
 
       idx.set(id, {
         rate_mm_yr: rate,
         last_date: lastDate,
-        source: "BUILDING_DATA_URL",
-        raw: r,
+        source: "tablecsv.csv",
       });
+    };
+
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+
+      buf += decoder.decode(value, { stream: true });
+
+      let lines = buf.split(/\r?\n/);
+      buf = lines.pop() ?? "";
+
+      for (const ln of lines) processLine(ln);
     }
+
+    buf += decoder.decode();
+    if (buf) processLine(buf);
 
     movementIndex.value = idx;
 
-    // אם כבר יש תוצאות – נחשב חריגות מחדש
     if (buildings.value.length) {
       buildings.value = buildings.value.map((b) => applyJoinAndAnomaly(b));
       await redrawOverlays();
@@ -362,6 +456,64 @@ async function reloadBuildingData() {
   } finally {
     loadingData.value = false;
   }
+}
+
+function parseCsvToIndex(text) {
+  const lines = text.split(/\r?\n/);
+  if (lines.length < 2) return new Map();
+
+  const headerLine = lines[0] || "";
+  const commaCount = (headerLine.match(/,/g) || []).length;
+  const semiCount = (headerLine.match(/;/g) || []).length;
+  const delim = semiCount > commaCount ? ";" : ",";
+
+  const headers = parseCsvLine(headerLine, delim).map((h) => h.trim()).filter(Boolean);
+
+  const idCandidates = ["id", "building_id", "bldg_id", "objectid", "ID"];
+  const rateCandidates = ["rate_mm_yr", "rate", "velocity", "vel", "v", "mm/yr", "mm_yr", "subsidence"];
+  const dateCandidates = ["last_date", "date", "timestamp", "time"];
+
+  const idCol = CSV_ID_COL_HINT ? pickHeaderFuzzy(headers, [CSV_ID_COL_HINT]) : pickHeaderFuzzy(headers, idCandidates);
+  const rateCol = CSV_RATE_COL_HINT
+    ? pickHeaderFuzzy(headers, [CSV_RATE_COL_HINT])
+    : pickHeaderFuzzy(headers, rateCandidates);
+  const dateCol = CSV_DATE_COL_HINT
+    ? pickHeaderFuzzy(headers, [CSV_DATE_COL_HINT])
+    : pickHeaderFuzzy(headers, dateCandidates);
+
+  if (!idCol || !rateCol) {
+    const sample = headers.slice(0, 60).join(", ");
+    throw new Error(
+      `לא הצלחתי לזהות עמודות ב-CSV (צריך לפחות ID + RATE).\n` +
+        `כותרות (חלקי): ${sample}\n` +
+        `אם אתה יודע את השמות: תגדיר CSV_ID_COL_HINT ו-CSV_RATE_COL_HINT.`
+    );
+  }
+
+  const idIdx = headers.findIndex((h) => sameHeader(h, idCol));
+  const rateIdx = headers.findIndex((h) => sameHeader(h, rateCol));
+  const dateIdx = dateCol ? headers.findIndex((h) => sameHeader(h, dateCol)) : -1;
+
+  const idx = new Map();
+
+  for (let i = 1; i < lines.length; i++) {
+    const line = lines[i];
+    if (!line) continue;
+    const row = parseCsvLine(line, delim);
+    if (!row || row.length <= Math.max(idIdx, rateIdx)) continue;
+
+    const id = String(row[idIdx] ?? "").trim();
+    if (!id) continue;
+
+    const rate = toNumberSafe(row[rateIdx]);
+    if (rate === null) continue;
+
+    const lastDate = dateIdx >= 0 ? String(row[dateIdx] ?? "").trim() : "";
+
+    idx.set(id, { rate_mm_yr: rate, last_date: lastDate, source: "tablecsv.csv" });
+  }
+
+  return idx;
 }
 
 /* =========================
@@ -377,40 +529,32 @@ async function loadBuildingsByWkt(wkt) {
   selected.value = null;
 
   try {
-    // כדי לא להפציץ את המערכת, נוודא שיש זום סביר
     const zoom = await window.govmap.getZoomLevel?.();
-    // אם הזום נמוך מדי, זה עלול להחזיר המון פוליגונים
     if (typeof zoom === "number" && zoom < 7) {
       throw new Error("הזום נמוך מדי לשאילתת בניינים. תתקרב (zoom) ואז תנסה שוב.");
     }
 
-    // intersectFeatures – נחפש ישויות בשכבה לפי גאומטריה WKT, ונבקש גם shapes.
     const params = {
       layerName: BUILDINGS_LAYER,
       geometry: wkt,
-      // השדות שתרצה לקבל (לפחות מזהה בניין)
       fields: [BUILDING_ID_FIELD],
-      // אם נתמך בשכבה, מחזיר גאומטריות (WKT) כדי שנוכל לצייר
       getShapes: true,
     };
 
     const resp = await window.govmap.intersectFeatures(params);
 
-    // מבנה התשובה יכול להשתנות מעט; ננסה לחלץ בצורה עמידה
     const items = Array.isArray(resp) ? resp : Array.isArray(resp?.data) ? resp.data : resp?.Data || [];
     const parsed = [];
 
     for (const it of items) {
       const objectId = it?.ObjectID ?? it?.objectId ?? it?.OBJECTID ?? it?.objectid ?? it?.id ?? null;
 
-      // ערכי שדות יכולים להיות ב-Values או Fields
       const values = it?.Values ?? it?.values ?? it?.Fields ?? it?.fields ?? [];
       const fieldVal = extractFieldValue(values, BUILDING_ID_FIELD);
 
       const joinKey = String(fieldVal ?? "").trim();
       if (!joinKey) continue;
 
-      // גאומטריה יכולה להגיע בכמה שמות – ננסה כולם
       const shape =
         it?.Shape ??
         it?.shape ??
@@ -418,7 +562,6 @@ async function loadBuildingsByWkt(wkt) {
         it?.wkt ??
         it?.Geometry ??
         it?.geometry ??
-        // לפעמים מופיע בתוך values בשם SHAPE
         extractFieldValue(values, "SHAPE");
 
       const geomWkt = typeof shape === "string" ? shape : "";
@@ -436,7 +579,6 @@ async function loadBuildingsByWkt(wkt) {
     }
 
     buildings.value = parsed;
-
     await redrawOverlays();
   } catch (err) {
     errorMsg.value = err?.message || String(err);
@@ -448,8 +590,7 @@ async function loadBuildingsByWkt(wkt) {
 function applyJoinAndAnomaly(b) {
   const m = movementIndex.value.get(String(b.joinKey));
   const rate = m?.rate_mm_yr;
-  const isAnom =
-    typeof rate === "number" && Number.isFinite(rate) ? Math.abs(rate) >= Number(rateThreshold.value) : false;
+  const isAnom = typeof rate === "number" && Number.isFinite(rate) ? Math.abs(rate) >= Number(rateThreshold.value) : false;
 
   return {
     ...b,
@@ -464,7 +605,6 @@ function applyJoinAndAnomaly(b) {
 async function clearOverlays() {
   if (!govReady.value) return;
   try {
-    // מוחק לפי שמות שהגדרנו ב-displayGeometries
     window.govmap.clearGeometriesByName(["anom", "norm", "sel"]);
   } catch (_) {}
 }
@@ -472,7 +612,6 @@ async function clearOverlays() {
 async function redrawOverlays() {
   if (!govReady.value) return;
 
-  // נקה קודם
   await clearOverlays();
 
   const anom = [];
@@ -490,7 +629,7 @@ async function redrawOverlays() {
   if (normToDraw.length) {
     await window.govmap.displayGeometries({
       wkts: normToDraw.map((b) => b.wkt),
-      names: normToDraw.map((b) => "norm"),
+      names: normToDraw.map(() => "norm"),
       geometryType: window.govmap.geometryType.POLYGON,
       defaultSymbol: {
         outlineColor: [0, 80, 255, 0.7],
@@ -499,18 +638,16 @@ async function redrawOverlays() {
       },
       symbols: [],
       clearExistings: false,
-      clearExisting: false, // ליתר ביטחון (יש דוגמאות עם השם הזה)
+      clearExisting: false,
       showBubble: false,
-      data: {
-        tooltips: normToDraw.map((b) => `בניין ${b.joinKey}`),
-      },
+      data: { tooltips: normToDraw.map((b) => `בניין ${b.joinKey}`) },
     });
   }
 
   if (anomToDraw.length) {
     await window.govmap.displayGeometries({
       wkts: anomToDraw.map((b) => b.wkt),
-      names: anomToDraw.map((b) => "anom"),
+      names: anomToDraw.map(() => "anom"),
       geometryType: window.govmap.geometryType.POLYGON,
       defaultSymbol: {
         outlineColor: [255, 0, 0, 1],
@@ -522,9 +659,7 @@ async function redrawOverlays() {
       clearExisting: false,
       showBubble: false,
       data: {
-        tooltips: anomToDraw.map(
-          (b) => `חריג • ${b.joinKey} • ${formatRate(b.movement?.rate_mm_yr)}`
-        ),
+        tooltips: anomToDraw.map((b) => `חריג • ${b.joinKey} • ${formatRate(b.movement?.rate_mm_yr)}`),
       },
     });
   }
@@ -562,10 +697,11 @@ async function drawRectangleAndLoad() {
     const res = await window.govmap.draw(window.govmap.drawType.Rectangle);
     const wkt = res?.wkt;
     if (!wkt) throw new Error("לא התקבל WKT מהשרטוט");
-    // נוח: להתמקד לציור
+
     try {
       window.govmap.zoomToDrawing?.();
     } catch (_) {}
+
     await loadBuildingsByWkt(wkt);
   } catch (err) {
     errorMsg.value = err?.message || String(err);
@@ -590,7 +726,6 @@ async function locateAddress() {
       type: window.govmap.geocodeType.AccuracyOnly,
     });
 
-    // אם תוצאה מדויקת יחידה, לרוב יש X/Y
     const x = resp?.X ?? resp?.x ?? resp?.data?.X ?? resp?.data?.x;
     const y = resp?.Y ?? resp?.y ?? resp?.data?.Y ?? resp?.data?.y;
 
@@ -623,7 +758,6 @@ async function pickPointAndInspect() {
 }
 
 async function inspectBuildingAtPoint(x, y) {
-  // נשאל בניין בנקודה (POINT WKT) – ואז נצייר רק אותו
   loadingQuery.value = true;
   errorMsg.value = "";
   selected.value = null;
@@ -643,11 +777,11 @@ async function inspectBuildingAtPoint(x, y) {
 
     if (!items.length) throw new Error("לא נמצא בניין בנקודה הזו.");
 
-    // ניקח את הראשון
     const it = items[0];
     const objectId = it?.ObjectID ?? it?.objectId ?? it?.OBJECTID ?? it?.objectid ?? it?.id ?? "";
     const values = it?.Values ?? it?.values ?? it?.Fields ?? it?.fields ?? [];
     const joinKey = String(extractFieldValue(values, BUILDING_ID_FIELD) ?? "").trim();
+
     const shape =
       it?.Shape ??
       it?.shape ??
@@ -684,7 +818,6 @@ async function selectBuilding(b) {
   selected.value = b;
   await drawSelectedOverlay(b);
 
-  // zoom to centroid (נחשב מה-WKT)
   const c = centroidFromPolygonWkt(b.wkt);
   if (c) {
     window.govmap.zoomToXY({ x: c.x, y: c.y, level: 9 });
@@ -696,28 +829,24 @@ async function selectBuilding(b) {
  *  Helpers
  * ========================= */
 function toNumberSafe(v) {
-  const n = Number(v);
+  const n = Number(String(v).replace(",", "."));
   return Number.isFinite(n) ? n : null;
 }
 
 function formatRate(v) {
   if (typeof v !== "number" || !Number.isFinite(v)) return "—";
-  const s = v.toFixed(2);
-  return `${s} mm/yr`;
+  return `${v.toFixed(2)} mm/yr`;
 }
 
 function extractFieldValue(values, fieldName) {
   if (!values) return null;
 
-  // 1) אם זה מערך של אובייקטים {FieldName/fieldName/name, Value/value}
   if (Array.isArray(values)) {
     const hit = values.find((x) => {
       const n = x?.FieldName ?? x?.fieldName ?? x?.name ?? x?.Field ?? x?.field ?? "";
       return String(n).toLowerCase() === String(fieldName).toLowerCase();
     });
     if (hit) return hit?.Value ?? hit?.value ?? hit?.val ?? null;
-
-    // לפעמים Values הוא object-map: {ID:123}
   } else if (typeof values === "object") {
     const keys = Object.keys(values);
     const k = keys.find((k0) => k0.toLowerCase() === String(fieldName).toLowerCase());
@@ -733,8 +862,6 @@ function extentToWkt(ext) {
   const xmax = ext?.xmax ?? ext?.XMax ?? ext?.XMAX;
   const ymax = ext?.ymax ?? ext?.YMax ?? ext?.YMAX;
   if (![xmin, ymin, xmax, ymax].every((v) => typeof v === "number")) return "";
-
-  // POLYGON((xmin ymin, xmax ymin, xmax ymax, xmin ymax, xmin ymin))
   return `POLYGON((${xmin} ${ymin}, ${xmax} ${ymin}, ${xmax} ${ymax}, ${xmin} ${ymax}, ${xmin} ${ymin}))`;
 }
 
@@ -752,7 +879,6 @@ function centroidFromPolygonWkt(wkt) {
 
   if (coords.length < 3) return null;
 
-  // centroid via shoelace
   let a = 0;
   let cx = 0;
   let cy = 0;
@@ -766,7 +892,6 @@ function centroidFromPolygonWkt(wkt) {
   }
   a *= 0.5;
   if (Math.abs(a) < 1e-9) {
-    // fallback: average
     const sx = coords.reduce((s, p) => s + p.x, 0);
     const sy = coords.reduce((s, p) => s + p.y, 0);
     return { x: sx / coords.length, y: sy / coords.length };
@@ -774,6 +899,71 @@ function centroidFromPolygonWkt(wkt) {
   cx /= 6 * a;
   cy /= 6 * a;
   return { x: cx, y: cy };
+}
+
+/** CSV helpers **/
+function normalizeHeader(s) {
+  return String(s ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\u200F\u200E]/g, "")
+    .replace(/[^a-z0-9א-ת]+/g, "");
+}
+
+function sameHeader(a, b) {
+  return normalizeHeader(a) === normalizeHeader(b);
+}
+
+// קודם מנסה התאמה מדויקת, ואם לא – "מכיל" (fuzzy)
+function pickHeaderFuzzy(headers, candidates) {
+  const nHeaders = headers.map((h) => normalizeHeader(h));
+
+  // exact
+  for (const c of candidates) {
+    const nc = normalizeHeader(c);
+    const idx = nHeaders.indexOf(nc);
+    if (idx >= 0) return headers[idx];
+  }
+
+  // contains
+  for (const c of candidates) {
+    const nc = normalizeHeader(c);
+    const idx = nHeaders.findIndex((h) => h.includes(nc) || nc.includes(h));
+    if (idx >= 0) return headers[idx];
+  }
+
+  return null;
+}
+
+// parser קטן עם תמיכה בגרשיים ו-"" בתוך גרשיים
+function parseCsvLine(line, delim = ",") {
+  const out = [];
+  let cur = "";
+  let inQuotes = false;
+
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+
+    if (ch === '"') {
+      if (inQuotes && line[i + 1] === '"') {
+        cur += '"';
+        i++;
+      } else {
+        inQuotes = !inQuotes;
+      }
+      continue;
+    }
+
+    if (!inQuotes && ch === delim) {
+      out.push(cur);
+      cur = "";
+      continue;
+    }
+
+    cur += ch;
+  }
+  out.push(cur);
+  return out;
 }
 
 /* =========================
@@ -788,17 +978,14 @@ onMounted(async () => {
   }
 });
 
-/* =========================
- *  WATCHERS
- * ========================= */
 watch([rateThreshold, showNormals], async () => {
-  // שינוי סף/תצוגה – נחשב מחדש ונצייר
   buildings.value = buildings.value.map((b) => applyJoinAndAnomaly(b));
   await redrawOverlays();
 });
 </script>
 
 <style scoped>
+/* --- נשאר כמו אצלך --- */
 .app {
   height: 100vh;
   width: 100%;
@@ -945,6 +1132,7 @@ watch([rateThreshold, showNormals], async () => {
   border: 1px solid #ffd0d0;
   color: #b3261e;
   font-size: 13px;
+  white-space: pre-wrap;
 }
 
 .muted {
