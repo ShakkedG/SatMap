@@ -1,309 +1,404 @@
 <template>
   <div class="app" dir="rtl">
-    <!-- LEFT PANEL -->
-    <aside class="panel" :class="{ open: panelOpen }">
-      <header class="panelHeader">
-        <div class="brand">
-          <div class="title">SatMap</div>
-          <div class="subtitle">Buildings (GovMap) + CSV Join + חריגות תנועה</div>
-        </div>
-        <button class="iconBtn" @click="panelOpen = !panelOpen" :title="panelOpen ? 'סגור' : 'פתח'">☰</button>
-      </header>
-
-      <nav class="tabs">
-        <button class="tab" :class="{ on: tab === 'search' }" @click="tab = 'search'">חיפוש</button>
-        <button class="tab" :class="{ on: tab === 'anoms' }" @click="tab = 'anoms'">חריגים</button>
-        <button class="tab" :class="{ on: tab === 'selected' }" @click="tab = 'selected'">נבחר</button>
-        <button class="tab" :class="{ on: tab === 'settings' }" @click="tab = 'settings'">הגדרות</button>
-      </nav>
-
-      <!-- STATUS BAR -->
-      <section class="statusBar">
-        <div class="pill" :class="{ ok: govReady }">
-          <span class="dot"></span>
-          <span>{{ govReady ? "GovMap מוכן" : "טוען GovMap..." }}</span>
-        </div>
-        <div class="pill" :class="{ ok: csvReady }" :title="csvReady ? `שורות: ${csvRowCount.toLocaleString()}` : csvError || ''">
-          <span class="dot"></span>
-          <span>{{ csvReady ? "CSV נטען" : "טוען CSV..." }}</span>
-        </div>
-      </section>
-
-      <div v-if="topError" class="errTop">
-        {{ topError }}
+    <!-- ===== Header (CrimesMap-ish) ===== -->
+    <header class="topbar">
+      <div class="brand">
+        <div class="title">SatMap</div>
+        <div class="subtitle">Buildings (GovMap) + CSV Join + חריגים</div>
       </div>
 
-      <!-- SEARCH TAB -->
-      <section v-show="tab === 'search'" class="box">
-        <div class="boxTitle">חיפוש בסגנון CrimesMap</div>
+      <div class="top-actions">
+        <button class="btn ghost" @click="panelOpen = !panelOpen" :title="panelOpen ? 'סגור פאנל' : 'פתח פאנל'">
+          ☰
+        </button>
+        <button class="btn" @click="reloadCsv" :disabled="csvLoading">
+          {{ csvLoading ? "טוען CSV…" : "רענן CSV" }}
+        </button>
+      </div>
+    </header>
 
-        <div class="row">
-          <label class="lbl">כתובת (GovMap geocode)</label>
-          <input class="inp" v-model.trim="addressQuery" placeholder="לדוגמה: הרוקמים 26 חולון" />
-        </div>
-        <div class="row2">
-          <button class="btn" :disabled="!govReady || !addressQuery" @click="locateAddress">אתר</button>
-          <button class="btn ghost" :disabled="!govReady" @click="toggleClickPick">
-            {{ clickPickOn ? "כיבוי לחיצה להצגת נתונים" : "הדלק לחיצה להצגת נתונים" }}
-          </button>
-        </div>
-
-        <div class="sep"></div>
-
-        <div class="row">
-          <label class="lbl">חיפוש לפי מזהה בניין (Join Key)</label>
-          <input class="inp" v-model.trim="idQuery" placeholder="הדבק ID של בניין" @keydown.enter="highlightIdOnMap" />
-        </div>
-        <div class="row2">
-          <button class="btn" :disabled="!govReady || !idQuery" @click="highlightIdOnMap">הדגש במפה</button>
-          <button class="btn ghost" :disabled="!idQuery" @click="openCsvOnlyById">הצג נתוני CSV</button>
+    <div class="body">
+      <!-- ===== Left panel ===== -->
+      <aside class="panel" :class="{ open: panelOpen }">
+        <div class="tabs">
+          <button class="tab" :class="{ on: tab === 'search' }" @click="tab = 'search'">חיפוש</button>
+          <button class="tab" :class="{ on: tab === 'anoms' }" @click="tab = 'anoms'">חריגים</button>
+          <button class="tab" :class="{ on: tab === 'selected' }" @click="tab = 'selected'">נבחר</button>
+          <button class="tab" :class="{ on: tab === 'settings' }" @click="tab = 'settings'">הגדרות</button>
         </div>
 
-        <div class="hint">
-          טיפ: אחרי “הדגש במפה” פשוט לחץ על הבניין כדי לראות את הנתונים שלו מה־CSV.
-        </div>
-      </section>
+        <!-- ===== SEARCH ===== -->
+        <section v-if="tab === 'search'" class="card">
+          <div class="cardTitle">חיפוש</div>
 
-      <!-- ANOMALIES TAB -->
-      <section v-show="tab === 'anoms'" class="box">
-        <div class="boxTitle">חריגים (לפי |rate|)</div>
-
-        <div class="row">
-          <label class="lbl">סף חריגה |rate| (mm/yr)</label>
-          <input class="inp" type="number" v-model.number="rateThreshold" step="0.5" />
-        </div>
-
-        <div class="row">
-          <label class="lbl">הצג גם לא־חריגים</label>
-          <label class="switch">
-            <input type="checkbox" v-model="showNormals" />
-            <span></span>
-          </label>
-        </div>
-
-        <div class="row2">
-          <button class="btn" :disabled="!govReady" @click="drawRectangleAndLoad">בחר אזור (מלבן) וטעינה</button>
-          <button class="btn ghost" :disabled="!govReady || !lastQueryWkt" @click="refreshFromLastQuery">טען שוב</button>
-        </div>
-
-        <div class="row2">
-          <button class="btn ghost" :disabled="!govReady" @click="clearOverlays">נקה הדגשות</button>
-          <button class="btn ghost" :disabled="loadingQuery" @click="toggleAutoRefresh">
-            {{ autoRefresh ? "כבה עדכון אוטומטי" : "הדלק עדכון אוטומטי" }}
-          </button>
-        </div>
-
-        <div class="sep"></div>
-
-        <div class="stats">
-          <div class="stat">
-            <div class="k">בניינים שנשלפו</div>
-            <div class="v">{{ buildings.length }}</div>
+          <div class="row">
+            <label class="lbl">חיפוש כתובת (GovMap geocode)</label>
+            <input class="inp" v-model.trim="addressQuery" placeholder="לדוגמה: הרוקמים 26 חולון" />
           </div>
-          <div class="stat">
-            <div class="k">JOIN hits</div>
-            <div class="v">{{ joinedCount }}</div>
-          </div>
-          <div class="stat">
-            <div class="k">חריגים</div>
-            <div class="v">{{ anomalies.length }}</div>
-          </div>
-          <div class="stat">
-            <div class="k">מצב</div>
-            <div class="v">{{ loadingQuery ? "טוען…" : "מוכן" }}</div>
-          </div>
-        </div>
-
-        <div class="sep"></div>
-
-        <div v-if="anomalies.length === 0" class="muted">
-          אין חריגים כרגע. בחר אזור/הורד סף.
-        </div>
-
-        <div v-else class="list">
-          <button
-            v-for="b in anomalies"
-            :key="b.key"
-            class="listItem"
-            :class="{ on: selected?.key === b.key }"
-            @click="selectBuilding(b)"
-          >
-            <div class="liTop">
-              <div class="liId">ID: {{ b.joinKey }}</div>
-              <div class="liRate">{{ formatRate(b.csv?.rate) }}</div>
-            </div>
-            <div class="liSub">
-              <span>objectId: {{ b.objectId }}</span>
-              <span class="dotSep">•</span>
-              <span v-if="b.csv?.rowsCount">שורות CSV: {{ b.csv.rowsCount }}</span>
-              <span v-else>אין CSV</span>
-            </div>
-          </button>
-        </div>
-      </section>
-
-      <!-- SELECTED TAB -->
-      <section v-show="tab === 'selected'" class="box">
-        <div class="boxTitle">בניין נבחר</div>
-
-        <div v-if="!selected" class="muted">
-          לחץ על בניין במפה (כשהמצב “לחיצה להצגת נתונים” דולק) או בחר מהרשימה.
-        </div>
-
-        <div v-else>
-          <div class="kv">
-            <div class="k">Join Key</div>
-            <div class="v">{{ selected.joinKey }}</div>
-
-            <div class="k">Rate (CSV)</div>
-            <div class="v">{{ formatRate(selected.csv?.rate) }}</div>
-
-            <div class="k">חריג?</div>
-            <div class="v">{{ selected.isAnomaly ? "כן" : "לא" }}</div>
-
-            <div class="k">שורות CSV</div>
-            <div class="v">{{ selected.csv?.rowsCount ?? 0 }}</div>
+          <div class="row2">
+            <button class="btn" @click="locateAddress" :disabled="!govReady || !addressQuery">אתר</button>
+            <button class="btn ghost" @click="clearMarker" :disabled="!govReady">נקה סמן</button>
           </div>
 
           <div class="sep"></div>
 
-          <div class="boxTitle small">שורות מה־CSV (ראשונות)</div>
-          <div v-if="!selected.csv?.rows?.length" class="muted">לא נמצאו נתוני CSV ל־ID הזה.</div>
+          <div class="row">
+            <label class="lbl">חיפוש לפי objectid</label>
+            <input class="inp" v-model.trim="objectIdQuery" placeholder="למשל: 417568" inputmode="numeric" />
+          </div>
+          <div class="row2">
+            <button class="btn" @click="findByObjectId" :disabled="!govReady || !objectIdQuery">מצא</button>
+            <button class="btn ghost" @click="selectByClick = !selectByClick" :class="{ on: selectByClick }" :disabled="!govReady">
+              {{ selectByClick ? "בחירה בלחיצה: פועל" : "בחירה בלחיצה: כבוי" }}
+            </button>
+          </div>
 
-          <div v-else class="csvTable">
-            <div class="csvRow csvHead">
-              <div v-for="(h, i) in selected.csv.headers" :key="i" class="cell">{{ h }}</div>
+          <div class="sep"></div>
+
+          <div class="row2">
+            <button class="btn" @click="drawRectangleAndLoad" :disabled="!govReady">
+              בחר אזור (מלבן) → טען חריגים
+            </button>
+            <button class="btn ghost" @click="refreshFromLastQuery" :disabled="!govReady || !lastQueryWkt">
+              טען שוב
+            </button>
+          </div>
+
+          <div class="row">
+            <label class="lbl">Auto-refresh לפי זום/תזוזה</label>
+            <label class="switch">
+              <input type="checkbox" v-model="autoRefresh" />
+              <span></span>
+            </label>
+          </div>
+
+          <div class="info">
+            <div class="k">סטטוס</div>
+            <div class="v">
+              <span v-if="!govReady">טוען GovMap…</span>
+              <span v-else>GovMap מוכן</span>
+              <span v-if="csvLoading"> · טוען CSV…</span>
+              <span v-if="queryLoading"> · שואב בניינים…</span>
             </div>
-            <div v-for="(r, ri) in selected.csv.rows" :key="ri" class="csvRow">
-              <div v-for="(c, ci) in r" :key="ci" class="cell">{{ c }}</div>
+          </div>
+
+          <div class="info">
+            <div class="k">CSV rows</div>
+            <div class="v">{{ csvCount.toLocaleString() }}</div>
+          </div>
+
+          <div v-if="errorMsg" class="err">{{ errorMsg }}</div>
+        </section>
+
+        <!-- ===== ANOMS ===== -->
+        <section v-if="tab === 'anoms'" class="card">
+          <div class="cardTitle">חריגים</div>
+
+          <div class="row">
+            <label class="lbl">סף חריגה |rate|</label>
+            <input class="inp" type="number" v-model.number="rateThreshold" step="0.5" />
+          </div>
+
+          <div class="row">
+            <label class="lbl">חיפוש בתוך הרשימה</label>
+            <input class="inp" v-model.trim="anomsFilter" placeholder="objectid…" />
+          </div>
+
+          <div class="muted" v-if="anomaliesFiltered.length === 0">
+            אין חריגים לפי הסף/הפילטר כרגע.
+          </div>
+
+          <div class="list" v-else>
+            <button
+              v-for="b in anomaliesFiltered"
+              :key="b.key"
+              class="listItem"
+              :class="{ on: selected?.objectId === b.objectId }"
+              @click="selectBuilding(b)"
+            >
+              <div class="liTop">
+                <div class="liId">objectid: {{ b.objectId }}</div>
+                <div class="liRate">{{ fmtRate(b.csv?.rate) }}</div>
+              </div>
+              <div class="liSub">
+                <span v-if="b.csv?.raw?.length">CSV: {{ b.csv.raw.join(", ") }}</span>
+                <span v-else>אין נתון CSV</span>
+              </div>
+            </button>
+          </div>
+
+          <div class="row2" style="margin-top: 10px">
+            <button class="btn ghost" @click="redrawOverlays" :disabled="!govReady">רענן הדגשות</button>
+            <button class="btn ghost" @click="clearOverlays" :disabled="!govReady">נקה הדגשות</button>
+          </div>
+        </section>
+
+        <!-- ===== SELECTED ===== -->
+        <section v-if="tab === 'selected'" class="card">
+          <div class="cardTitle">פרטי בניין</div>
+
+          <div class="muted" v-if="!selected">
+            בחר בניין (לחיצה על המפה / “מצא לפי objectid” / מהרשימה).
+          </div>
+
+          <template v-else>
+            <div class="kv">
+              <div class="k">objectid</div>
+              <div class="v">{{ selected.objectId }}</div>
+
+              <div class="k">Rate (CSV)</div>
+              <div class="v">{{ fmtRate(selected.csv?.rate) }}</div>
+
+              <div class="k">חריג?</div>
+              <div class="v">{{ selected.isAnomaly ? "כן" : "לא" }}</div>
+
+              <div class="k">שורת CSV</div>
+              <div class="v mono">{{ selected.csv?.raw?.join(", ") || "לא נמצא ב־CSV" }}</div>
             </div>
+
+            <div class="row2" style="margin-top: 10px">
+              <button class="btn" @click="zoomToSelected" :disabled="!govReady">זום לבניין</button>
+              <button class="btn ghost" @click="copyObjectId">העתק objectid</button>
+            </div>
+          </template>
+
+          <div v-if="errorMsg" class="err" style="margin-top: 10px">{{ errorMsg }}</div>
+        </section>
+
+        <!-- ===== SETTINGS ===== -->
+        <section v-if="tab === 'settings'" class="card">
+          <div class="cardTitle">הגדרות</div>
+
+          <div class="row">
+            <label class="lbl">GovMap Token</label>
+            <input class="inp" v-model="GOVMAP_TOKEN" />
           </div>
 
-          <div class="row2 mt12">
-            <button class="btn ghost" :disabled="!govReady" @click="zoomToSelected">התמקד לבניין</button>
-            <button class="btn ghost" :disabled="!govReady" @click="clearSelection">נקה בחירה</button>
+          <div class="row">
+            <label class="lbl">שכבת בניינים (GovMap layer)</label>
+            <input class="inp" v-model="BUILDINGS_LAYER" />
           </div>
-        </div>
-      </section>
 
-      <!-- SETTINGS TAB -->
-      <section v-show="tab === 'settings'" class="box">
-        <div class="boxTitle">הגדרות / דיבוג</div>
-
-        <div class="muted small">
-          <div><b>שכבת בניינים:</b> {{ BUILDINGS_LAYER }}</div>
-          <div><b>שדה מזהה בשכבה:</b> {{ BUILDING_ID_FIELD }}</div>
-          <div><b>CSV:</b> {{ CSV_URL }}</div>
-          <div class="mt8">
-            אם “לחיצה לא עושה כלום” — ודא שהמצב “לחיצה להצגת נתונים” דולק, ושאתה לוחץ בתוך המפה (לא על הפאנל).
+          <div class="row">
+            <label class="lbl">CSV URL</label>
+            <input class="inp" v-model="CSV_PATH" />
           </div>
-        </div>
 
-        <div class="sep"></div>
+          <div class="sep"></div>
 
-        <div class="row2">
-          <button class="btn ghost" :disabled="!csvReady" @click="reloadCsv">טען CSV מחדש</button>
-          <button class="btn ghost" :disabled="!govReady" @click="rebindMapClick">רענן מאזין לחיצה</button>
-        </div>
+          <div class="muted small">
+            <div>• GovMap CLICK event מחזיר mapPoint (x,y) ואנחנו עושים intersectFeatures בנקודה. :contentReference[oaicite:1]{index=1}</div>
+            <div>• ה־JOIN נעשה לפי objectid (ObjectId בתשובה של GovMap).</div>
+            <div>• CSV אצלך בלי כותרות → ברירת מחדל: עמודה 0 = objectid, עמודה אחרונה = rate.</div>
+          </div>
 
-        <div v-if="csvError" class="err mt12">{{ csvError }}</div>
-      </section>
-    </aside>
+          <div class="row2" style="margin-top: 10px">
+            <button class="btn" @click="reinit" :disabled="!GOVMAP_TOKEN">הפעל מחדש מפה</button>
+            <button class="btn ghost" @click="reloadCsv">טען CSV מחדש</button>
+          </div>
 
-    <!-- MAP -->
-    <main class="mapWrap">
-      <div id="map" class="map"></div>
+          <div v-if="errorMsg" class="err" style="margin-top: 10px">{{ errorMsg }}</div>
+        </section>
+      </aside>
 
-      <div v-if="toast" class="toast" @click="toast = ''">{{ toast }}</div>
-    </main>
+      <!-- ===== Map ===== -->
+      <main class="mapWrap">
+        <div id="map" class="map"></div>
+
+        <div class="toast" v-if="toast">{{ toast }}</div>
+      </main>
+    </div>
   </div>
 </template>
 
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 
-/* =========================
-   CONFIG – תתאים אליך
-========================= */
-const GOVMAP_TOKEN = "ede9a5fd-7c23-432f-8ffb-d85feffa3f3c";
+/**
+ * =========================
+ * CONFIG (editable in UI too)
+ * =========================
+ */
+const GOVMAP_TOKEN = ref("ede9a5fd-7c23-432f-8ffb-d85feffa3f3c");
+const BUILDINGS_LAYER = ref("225287");
 
-// שכבת הבניינים (כמו אצלך)
-const BUILDINGS_LAYER = "225287";
+/**
+ * CSV location:
+ * file sits in: client/public/data/tablecsv.csv
+ * so it should be served as: <BASE_URL>/data/tablecsv.csv
+ */
+const CSV_PATH = ref("data/tablecsv.csv");
 
-// השדה שמייצג מזהה בניין בשכבה (אם לא נכון – לא יהיה JOIN!)
-const BUILDING_ID_FIELD = "ID";
-
-// CSV נמצא כאן: client/public/data/tablecsv.csv
-// חשוב: BASE_URL זה path (למשל "/SatMap/") ולכן מצרפים מחרוזות ולא משתמשים ב-new URL(..., BASE_URL)
-const CSV_URL = `${import.meta.env.BASE_URL}data/tablecsv.csv`;
-
-// אם אין כותרת ב-CSV (נראה שאין) – נשאר false
-const CSV_HAS_HEADER = false;
-
-// עמודת ID + עמודת rate (ב-CSV בלי כותרת)
+/**
+ * CSV format (based on your screenshot):
+ *   objectid, <something>, rate
+ * No header.
+ * Defaults:
+ *   id col = 0
+ *   rate col = last
+ */
 const CSV_ID_COL = 0;
-const CSV_RATE_COL = 2;
+const CSV_RATE_COL = -1; // last column
 
-// כמה שורות להציג בפרטי בניין (לא להעמיס UI)
-const MAX_CSV_ROWS_PREVIEW = 20;
+/**
+ * Highlight limits
+ */
+const MAX_DRAW_ANOMS = 800;
+const MAX_DRAW_NORMALS = 400;
 
-// ביצועים בציור
-const MAX_DRAW_ANOMALIES = 800;
-const MAX_DRAW_NORMALS = 800;
-
-/* =========================
-   STATE
-========================= */
+/**
+ * =========================
+ * STATE
+ * =========================
+ */
 const panelOpen = ref(true);
-const tab = ref("search"); // search | anoms | selected | settings
+const tab = ref("search");
 
 const govReady = ref(false);
-const csvReady = ref(false);
-const loadingQuery = ref(false);
-
-const topError = ref("");
-const csvError = ref("");
+const csvLoading = ref(false);
+const queryLoading = ref(false);
+const errorMsg = ref("");
 
 const toast = ref("");
+let toastT = null;
 
 const addressQuery = ref("");
-const idQuery = ref("");
+const objectIdQuery = ref("");
+
+const selectByClick = ref(true);
+const autoRefresh = ref(false);
 
 const rateThreshold = ref(2.0);
-const showNormals = ref(false);
-const autoRefresh = ref(false);
-const clickPickOn = ref(true);
+const anomsFilter = ref("");
 
 const lastQueryWkt = ref("");
+
+/**
+ * CSV index: objectid(string) -> { rate:number|null, raw:string[] }
+ */
+const csvIndex = ref(new Map());
+const csvCount = computed(() => csvIndex.value.size);
+
+/**
+ * Buildings in current query extent/rectangle:
+ * { key, objectId, wkt, csv, isAnomaly }
+ */
 const buildings = ref([]);
 const selected = ref(null);
 
-// CSV index: id -> { rows: string[][], rate: number|null, headers: string[], rowsCount: number }
-const csvIndex = ref(new Map());
-const csvRowCount = ref(0);
-const csvHeaders = ref([]);
-
-// debounce / anti-double click
-let lastClickTs = 0;
-
-/* =========================
-   DERIVED
-========================= */
-const joinedCount = computed(() => buildings.value.filter((b) => !!b.csv).length);
-
-const anomalies = computed(() =>
-  [...buildings.value]
-    .filter((b) => b.isAnomaly)
-    .sort((a, b) => Math.abs((b.csv?.rate ?? 0) - 0) - Math.abs((a.csv?.rate ?? 0) - 0))
-);
-
-/* =========================
-   GOVMAP loader + init
-========================= */
-function gm() {
-  return window.govmap;
+/**
+ * =========================
+ * Helpers
+ * =========================
+ */
+function setToast(msg, ms = 2200) {
+  toast.value = msg;
+  if (toastT) clearTimeout(toastT);
+  toastT = setTimeout(() => (toast.value = ""), ms);
 }
 
+function toNum(v) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+function fmtRate(v) {
+  if (typeof v !== "number" || !Number.isFinite(v)) return "—";
+  return `${v.toFixed(2)}`;
+}
+
+function baseUrlify(rel) {
+  // Works in Vite / GitHub Pages when base is configured:
+  // new URL(rel, import.meta.env.BASE_URL) -> absolute
+  try {
+    return new URL(rel, import.meta.env.BASE_URL).toString();
+  } catch {
+    // fallback: relative
+    return rel;
+  }
+}
+
+async function fetchTextSmart(urlCandidates) {
+  let lastErr = null;
+  for (const u of urlCandidates) {
+    try {
+      const res = await fetch(u, { cache: "no-store" });
+      if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+      return await res.text();
+    } catch (e) {
+      lastErr = new Error(`נכשל: ${u} (${e?.message || e})`);
+    }
+  }
+  throw lastErr || new Error("fetch failed");
+}
+
+/**
+ * =========================
+ * CSV loader (real CSV)
+ * =========================
+ */
+async function reloadCsv() {
+  csvLoading.value = true;
+  errorMsg.value = "";
+  try {
+    const rel = CSV_PATH.value.replace(/^\//, "");
+    const urlA = baseUrlify(rel);
+    // extra fallbacks for GH Pages confusion
+    const urlB = "/" + rel;
+    const urlC = `./${rel}`;
+
+    const text = await fetchTextSmart([urlA, urlB, urlC]);
+
+    const idx = new Map();
+
+    // fast-ish parse for simple CSV (no quoted commas expected)
+    const lines = text.split(/\r?\n/);
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (!line) continue;
+
+      const cols = line.split(",");
+      if (cols.length < 2) continue;
+
+      // header detection (if any letters in first line)
+      if (i === 0 && /[A-Za-z\u0590-\u05FF]/.test(line)) {
+        // has header -> skip for now (you can extend later)
+        continue;
+      }
+
+      const id = String(cols[CSV_ID_COL] ?? "").trim();
+      if (!id) continue;
+
+      const rateColIndex = CSV_RATE_COL < 0 ? cols.length + CSV_RATE_COL : CSV_RATE_COL;
+      const rate = toNum(cols[rateColIndex]);
+
+      idx.set(id, { rate, raw: cols.map((c) => c.trim()) });
+    }
+
+    csvIndex.value = idx;
+    setToast(`CSV נטען: ${idx.size.toLocaleString()} שורות`);
+
+    // refresh joined buildings + redraw
+    if (buildings.value.length) {
+      buildings.value = buildings.value.map(applyCsvJoinAndAnom);
+      await redrawOverlays();
+    }
+    if (selected.value) {
+      selected.value = applyCsvJoinAndAnom(selected.value);
+    }
+  } catch (e) {
+    errorMsg.value = e?.message || String(e);
+  } finally {
+    csvLoading.value = false;
+  }
+}
+
+/**
+ * =========================
+ * GovMap init
+ * =========================
+ */
 function loadGovMapScript() {
   return new Promise((resolve, reject) => {
     if (window.govmap) return resolve();
@@ -317,8 +412,8 @@ function loadGovMapScript() {
       }, 50);
       setTimeout(() => {
         clearInterval(t);
-        reject(new Error("GovMap script loaded but window.govmap not found"));
-      }, 12000);
+        reject(new Error("GovMap script loaded but govmap object not found"));
+      }, 8000);
       return;
     }
 
@@ -333,41 +428,49 @@ function loadGovMapScript() {
 }
 
 async function initGovMap() {
-  topError.value = "";
+  errorMsg.value = "";
+  govReady.value = false;
+
   await loadGovMapScript();
+  if (!GOVMAP_TOKEN.value) throw new Error("חסר GOVMAP_TOKEN");
 
-  if (!GOVMAP_TOKEN) throw new Error("חסר GOVMAP_TOKEN");
-
-  gm().createMap("map", {
-    token: GOVMAP_TOKEN,
+  window.govmap.createMap("map", {
+    token: GOVMAP_TOKEN.value,
     background: 3,
-    layers: [BUILDINGS_LAYER],       // מנסה גם להציג את שכבת הבניינים עצמה
-    visibleLayers: [BUILDINGS_LAYER],
+    // show the layer (as requested)
+    layers: [BUILDINGS_LAYER.value],
     showXY: false,
-    identifyOnClick: false,
+    identifyOnClick: false, // אנחנו מנהלים קליקים לבד
     isEmbeddedToggle: false,
     layersMode: 1,
     zoomButtons: true,
-
-    // הכי חשוב: onClick שמתרגם ללחיצה ובודק בניין
-    onClick: async (e) => {
-      if (!clickPickOn.value) return;
-      await handleMapClick(e);
-    },
-
     onLoad: () => {
       govReady.value = true;
-      // גיבוי: גם אירוע CLICK (בחלק מהדפדפנים זה יציב יותר)
-      rebindMapClick();
-      toastMsg("המפה מוכנה. לחץ על בניין כדי לראות נתוני CSV.");
+      bindGovEvents();
+      setToast("GovMap מוכן");
     },
     onError: (e) => {
-      topError.value = "שגיאת GovMap: " + (e?.message || JSON.stringify(e));
+      errorMsg.value = "שגיאת GovMap: " + (e?.message || JSON.stringify(e));
     },
   });
+}
 
-  // עדכון לפי תצוגה (אם הופעל)
-  gm().onEvent(gm().events.EXTENT_CHANGE).progress(async (e) => {
+function bindGovEvents() {
+  try {
+    window.govmap.unbindEvent(window.govmap.events.CLICK);
+    window.govmap.unbindEvent(window.govmap.events.EXTENT_CHANGE);
+  } catch (_) {}
+
+  // Click on map -> pick building -> join CSV
+  window.govmap.onEvent(window.govmap.events.CLICK).progress(async (e) => {
+    if (!selectByClick.value) return;
+    const p = e?.mapPoint;
+    if (!p) return;
+    await inspectBuildingAtPoint(p.x, p.y);
+  });
+
+  // Extent change -> auto refresh query
+  window.govmap.onEvent(window.govmap.events.EXTENT_CHANGE).progress(async (e) => {
     if (!autoRefresh.value) return;
     const extent = e?.extent;
     const wkt = extentToWkt(extent);
@@ -375,79 +478,137 @@ async function initGovMap() {
   });
 }
 
-function rebindMapClick() {
+async function reinit() {
   try {
-    gm().unbindEvent?.(gm().events.CLICK);
-  } catch (_) {}
-
-  try {
-    gm().onEvent(gm().events.CLICK).progress(async (e) => {
-      if (!clickPickOn.value) return;
-      await handleMapClick(e);
-    });
-  } catch (_) {
-    // לא קריטי: onClick של createMap עדיין עובד
+    await initGovMap();
+    await redrawOverlays();
+  } catch (e) {
+    errorMsg.value = e?.message || String(e);
   }
 }
 
 onBeforeUnmount(() => {
   try {
-    gm()?.unbindEvent?.(gm().events.EXTENT_CHANGE);
-    gm()?.unbindEvent?.(gm().events.CLICK);
+    if (window.govmap?.unbindEvent) {
+      window.govmap.unbindEvent(window.govmap.events.CLICK);
+      window.govmap.unbindEvent(window.govmap.events.EXTENT_CHANGE);
+    }
   } catch (_) {}
 });
 
-/* =========================
-   MAP CLICK -> SELECT BUILDING
-========================= */
-async function handleMapClick(e) {
-  const now = Date.now();
-  if (now - lastClickTs < 250) return; // למנוע דאבל-טריגר (onClick + onEvent)
-  lastClickTs = now;
+/**
+ * =========================
+ * GovMap querying
+ * =========================
+ */
+function applyCsvJoinAndAnom(b) {
+  const csv = csvIndex.value.get(String(b.objectId));
+  const rate = csv?.rate;
+  const isAnomaly = typeof rate === "number" && Number.isFinite(rate) && Math.abs(rate) >= Number(rateThreshold.value);
 
-  if (!govReady.value) return;
-
-  const p = extractMapPoint(e);
-  if (!p) return;
-
-  await inspectBuildingAtPoint(p.x, p.y);
+  return {
+    ...b,
+    csv: csv || null,
+    isAnomaly: !!csv && isAnomaly,
+  };
 }
 
-function extractMapPoint(e) {
-  const mp = e?.mapPoint || e?.MapPoint || e?.point || e?.Point;
-  if (mp && typeof mp.x === "number" && typeof mp.y === "number") return { x: mp.x, y: mp.y };
+async function loadBuildingsByWkt(wkt) {
+  if (!govReady.value || !wkt) return;
 
-  const x = e?.x ?? e?.X;
-  const y = e?.y ?? e?.Y;
-  if (typeof x === "number" && typeof y === "number") return { x, y };
+  queryLoading.value = true;
+  errorMsg.value = "";
+  lastQueryWkt.value = wkt;
+  selected.value = null;
 
-  return null;
+  try {
+    const params = {
+      layerName: BUILDINGS_LAYER.value,
+      geometry: wkt,
+      fields: [], // לא חייבים שדות בשביל objectid
+      getShapes: true,
+    };
+
+    const resp = await window.govmap.intersectFeatures(params);
+    const items = Array.isArray(resp?.data) ? resp.data : Array.isArray(resp) ? resp : [];
+
+    const parsed = [];
+    for (const it of items) {
+      const objectId =
+        it?.ObjectId ??
+        it?.ObjectID ??
+        it?.objectid ??
+        it?.objectId ??
+        it?.id ??
+        null;
+
+      if (objectId == null) continue;
+
+      const shape =
+        it?.Shape ??
+        it?.shape ??
+        it?.WKT ??
+        it?.wkt ??
+        it?.Geometry ??
+        it?.geometry ??
+        "";
+
+      parsed.push(
+        applyCsvJoinAndAnom({
+          key: `${objectId}`,
+          objectId: String(objectId),
+          wkt: typeof shape === "string" ? shape : "",
+          csv: null,
+          isAnomaly: false,
+        })
+      );
+    }
+
+    buildings.value = parsed;
+    await redrawOverlays();
+    setToast(`נטענו ${parsed.length.toLocaleString()} בניינים באזור`);
+  } catch (e) {
+    errorMsg.value = e?.message || String(e);
+  } finally {
+    queryLoading.value = false;
+  }
 }
 
 async function inspectBuildingAtPoint(x, y) {
-  loadingQuery.value = true;
-  topError.value = "";
+  if (!govReady.value) return;
+
+  queryLoading.value = true;
+  errorMsg.value = "";
+
   try {
     const wkt = `POINT(${x} ${y})`;
 
-    const resp = await gm().intersectFeatures({
+    const params = {
+      layerName: BUILDINGS_LAYER.value,
       geometry: wkt,
-      layerName: BUILDINGS_LAYER,
-      fields: [BUILDING_ID_FIELD],
+      fields: [],
       getShapes: true,
-    });
+    };
 
-    const items = Array.isArray(resp) ? resp : Array.isArray(resp?.data) ? resp.data : resp?.Data || [];
+    const resp = await window.govmap.intersectFeatures(params);
+    const items = Array.isArray(resp?.data) ? resp.data : Array.isArray(resp) ? resp : [];
     if (!items.length) {
-      toastMsg("לא נמצא בניין בנקודה הזו.");
+      setToast("לא נמצא בניין בנקודה");
       return;
     }
 
     const it = items[0];
-    const objectId = it?.objectid ?? it?.ObjectID ?? it?.OBJECTID ?? it?.id ?? "";
+    const objectId =
+      it?.ObjectId ??
+      it?.ObjectID ??
+      it?.objectid ??
+      it?.objectId ??
+      it?.id ??
+      null;
 
-    const values = it?.Values ?? it?.values ?? it?.Fields ?? it?.fields ?? [];
-    const joinKey = String(extractFieldValue(values, BUILDING_ID_FIELD) ?? "").trim();
+    if (objectId == null) {
+      throw new Error("לא התקבל objectid מה־GovMap");
+    }
 
     const shape =
       it?.Shape ??
@@ -456,219 +617,150 @@ async function inspectBuildingAtPoint(x, y) {
       it?.wkt ??
       it?.Geometry ??
       it?.geometry ??
-      extractFieldValue(values, "SHAPE");
+      "";
 
-    const geomWkt = typeof shape === "string" ? shape : "";
-
-    if (!joinKey) {
-      toastMsg(`נמצא בניין אבל לא נמצא שדה ${BUILDING_ID_FIELD}. עדכן BUILDING_ID_FIELD.`);
-      return;
-    }
-
-    const b = buildBuildingRecord({
-      objectId,
-      joinKey,
-      wkt: geomWkt,
+    const b = applyCsvJoinAndAnom({
+      key: `${objectId}`,
+      objectId: String(objectId),
+      wkt: typeof shape === "string" ? shape : "",
+      csv: null,
+      isAnomaly: false,
     });
 
     selected.value = b;
     tab.value = "selected";
-
     await drawSelectedOverlay(b);
-    await updateMarkerToBuilding(b);
 
-    // הודעה קטנה
-    toastMsg(b.csv ? `נבחר בניין ${b.joinKey} (rate: ${formatRate(b.csv.rate)})` : `נבחר בניין ${b.joinKey} (אין נתוני CSV)`);
+    // marker for feedback
+    window.govmap.setMapMarker?.({ x, y });
 
-  } catch (err) {
-    topError.value = err?.message || String(err);
-  } finally {
-    loadingQuery.value = false;
-  }
-}
-
-function buildBuildingRecord({ objectId, joinKey, wkt }) {
-  const csv = lookupCsv(joinKey);
-  const rate = csv?.rate;
-  const isAnom = typeof rate === "number" && Number.isFinite(rate) ? Math.abs(rate) >= Number(rateThreshold.value) : false;
-
-  return {
-    key: `${joinKey}__${objectId || Math.random().toString(16).slice(2)}`,
-    objectId,
-    joinKey,
-    wkt,
-    csv,
-    isAnomaly: !!csv && isAnom,
-  };
-}
-
-/* =========================
-   CSV LOADING (REAL CSV)
-========================= */
-async function loadCsv() {
-  csvReady.value = false;
-  csvError.value = "";
-  csvRowCount.value = 0;
-  csvIndex.value = new Map();
-  csvHeaders.value = [];
-
-  try {
-    const res = await fetch(CSV_URL, { cache: "no-store" });
-    if (!res.ok) throw new Error(`CSV לא נטען (${res.status}) — בדוק שהקובץ נמצא ב-public/data/tablecsv.csv`);
-
-    // Streaming parse (כדי לא לתקוע על 13.6MB)
-    const reader = res.body?.getReader?.();
-    if (!reader) {
-      const text = await res.text();
-      parseCsvText(text);
+    if (!b.csv) {
+      setToast(`נבחר objectid=${b.objectId} (לא נמצא ב־CSV)`);
     } else {
-      await parseCsvStream(reader);
+      setToast(`נבחר objectid=${b.objectId} (CSV נמצא)`);
     }
-
-    csvReady.value = true;
-    toastMsg(`CSV נטען בהצלחה (${csvRowCount.value.toLocaleString()} שורות).`);
-  } catch (err) {
-    csvError.value = err?.message || String(err);
+  } catch (e) {
+    errorMsg.value = e?.message || String(e);
+  } finally {
+    queryLoading.value = false;
   }
 }
 
-async function parseCsvStream(reader) {
-  const decoder = new TextDecoder("utf-8");
-  let buffer = "";
-  let lineNo = 0;
+/**
+ * =========================
+ * Draw overlays (highlight)
+ * =========================
+ */
+async function clearOverlays() {
+  if (!govReady.value) return;
+  try {
+    window.govmap.clearGeometriesByName(["anom", "norm", "sel"]);
+  } catch (_) {}
+}
 
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) break;
+async function redrawOverlays() {
+  if (!govReady.value) return;
 
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split(/\r?\n/);
-    buffer = lines.pop() || "";
+  await clearOverlays();
 
-    for (const line of lines) {
-      lineNo++;
-      processCsvLine(line, lineNo);
-    }
+  const anoms = [];
+  const normals = [];
+
+  for (const b of buildings.value) {
+    if (!b.wkt || !String(b.wkt).toUpperCase().includes("POLYGON")) continue;
+    if (b.isAnomaly) anoms.push(b);
+    else normals.push(b);
   }
 
-  buffer += decoder.decode();
-  if (buffer.trim()) {
-    lineNo++;
-    processCsvLine(buffer, lineNo);
+  const anomToDraw = anoms.slice(0, MAX_DRAW_ANOMS);
+  const normToDraw = normals.slice(0, MAX_DRAW_NORMALS);
+
+  if (normToDraw.length) {
+    await window.govmap.displayGeometries({
+      wkts: normToDraw.map((b) => b.wkt),
+      names: normToDraw.map(() => "norm"),
+      geometryType: window.govmap.geometryType.POLYGON,
+      defaultSymbol: {
+        outlineColor: [0, 90, 255, 0.8],
+        outlineWidth: 1,
+        fillColor: [0, 90, 255, 0.08],
+      },
+      clearExisting: false,
+      clearExistings: false,
+      showBubble: false,
+      data: { tooltips: normToDraw.map((b) => `objectid: ${b.objectId}`) },
+    });
+  }
+
+  if (anomToDraw.length) {
+    await window.govmap.displayGeometries({
+      wkts: anomToDraw.map((b) => b.wkt),
+      names: anomToDraw.map(() => "anom"),
+      geometryType: window.govmap.geometryType.POLYGON,
+      defaultSymbol: {
+        outlineColor: [255, 0, 0, 1],
+        outlineWidth: 2,
+        fillColor: [255, 0, 0, 0.28],
+      },
+      clearExisting: false,
+      clearExistings: false,
+      showBubble: false,
+      data: {
+        tooltips: anomToDraw.map((b) => `חריג • objectid:${b.objectId} • rate:${fmtRate(b.csv?.rate)}`),
+      },
+    });
+  }
+
+  if (selected.value) {
+    await drawSelectedOverlay(selected.value);
   }
 }
 
-function parseCsvText(text) {
-  const lines = text.split(/\r?\n/);
-  let lineNo = 0;
-  for (const line of lines) {
-    lineNo++;
-    processCsvLine(line, lineNo);
-  }
+async function drawSelectedOverlay(b) {
+  if (!govReady.value || !b?.wkt || !String(b.wkt).toUpperCase().includes("POLYGON")) return;
+  try {
+    window.govmap.clearGeometriesByName(["sel"]);
+  } catch (_) {}
+
+  await window.govmap.displayGeometries({
+    wkts: [b.wkt],
+    names: ["sel"],
+    geometryType: window.govmap.geometryType.POLYGON,
+    defaultSymbol: {
+      outlineColor: [255, 215, 0, 1],
+      outlineWidth: 3,
+      fillColor: [255, 215, 0, 0.14],
+    },
+    clearExisting: false,
+    clearExistings: false,
+    showBubble: false,
+    data: { tooltips: [`נבחר • objectid: ${b.objectId}`] },
+  });
 }
 
-function processCsvLine(line, lineNo) {
-  const s = line.trim();
-  if (!s) return;
-
-  const cols = splitCsvSimple(s);
-  if (!cols.length) return;
-
-  // header detection (אם CSV_HAS_HEADER)
-  if (lineNo === 1 && CSV_HAS_HEADER) {
-    csvHeaders.value = cols.map((c, i) => c || `col${i}`);
-    return;
-  }
-
-  // no header:
-  if (lineNo === 1 && !CSV_HAS_HEADER && !csvHeaders.value.length) {
-    // ניצור כותרות גנריות לפי מספר עמודות
-    csvHeaders.value = cols.map((_, i) => (i === CSV_ID_COL ? "id" : i === CSV_RATE_COL ? "rate" : `col${i}`));
-  }
-
-  const id = normalizeId(cols[CSV_ID_COL]);
-  if (!id) return;
-
-  const rate = toNumberSafe(cols[CSV_RATE_COL]);
-
-  const map = csvIndex.value;
-  let rec = map.get(id);
-  if (!rec) {
-    rec = {
-      headers: csvHeaders.value,
-      rows: [],
-      rowsCount: 0,
-      rate: null,
-    };
-    map.set(id, rec);
-  }
-
-  rec.rowsCount++;
-
-  // נשמור כמה שורות ראשונות להצגה (לא את כולן)
-  if (rec.rows.length < MAX_CSV_ROWS_PREVIEW) {
-    rec.rows.push(cols);
-  }
-
-  // rate: אם יש כמה שורות לאותו ID – נשמור את האחרון (אפשר להחליף ל-average אם תרצה)
-  if (typeof rate === "number" && Number.isFinite(rate)) {
-    rec.rate = rate;
-  }
-
-  csvRowCount.value++;
-}
-
-function splitCsvSimple(line) {
-  // parser קל: תומך בקבצי CSV “פשוטים” (כמו אצלך – מספרים מופרדים בפסיק, בלי גרשיים מורכבים)
-  // אם בעתיד יהיו גרשיים/פסיקים בתוך טקסט – נחליף ל-parser מלא.
-  return line.split(",").map((x) => x.trim());
-}
-
-function normalizeId(v) {
-  const s = String(v ?? "").trim();
-  if (!s) return "";
-  // ננסה גם “מספרי” (למקרה שב-GovMap זה number וב-CSV זה string)
-  const n = Number(s);
-  if (Number.isFinite(n) && String(n) !== "NaN") return String(n);
-  return s;
-}
-
-function lookupCsv(joinKey) {
-  if (!csvReady.value) return null;
-  const key1 = normalizeId(joinKey);
-  const map = csvIndex.value;
-
-  return map.get(key1) || null;
-}
-
-function toNumberSafe(v) {
-  const n = Number(String(v).trim());
-  return Number.isFinite(n) ? n : null;
-}
-
-/* =========================
-   LOAD BUILDINGS BY RECT (JOIN + ANOMS)
-========================= */
+/**
+ * =========================
+ * UI actions
+ * =========================
+ */
 async function drawRectangleAndLoad() {
   if (!govReady.value) return;
-  topError.value = "";
+  errorMsg.value = "";
+
   try {
-    const res = await gm().draw(gm().drawType.Rectangle);
+    const res = await window.govmap.draw(window.govmap.drawType.Rectangle);
     const wkt = res?.wkt;
     if (!wkt) throw new Error("לא התקבל WKT מהשרטוט");
-    lastQueryWkt.value = wkt;
-
     try {
-      gm().zoomToDrawing?.();
+      window.govmap.zoomToDrawing?.();
     } catch (_) {}
-
     await loadBuildingsByWkt(wkt);
     tab.value = "anoms";
-  } catch (err) {
-    topError.value = err?.message || String(err);
+  } catch (e) {
+    errorMsg.value = e?.message || String(e);
   } finally {
     try {
-      gm().setDefaultTool?.();
+      window.govmap.setDefaultTool?.();
     } catch (_) {}
   }
 }
@@ -678,292 +770,88 @@ async function refreshFromLastQuery() {
   await loadBuildingsByWkt(lastQueryWkt.value);
 }
 
-async function loadBuildingsByWkt(wkt) {
-  if (!govReady.value) return;
-  if (!wkt) return;
-
-  loadingQuery.value = true;
-  topError.value = "";
-
-  try {
-    const zoom = await gm().getZoomLevel?.();
-    if (typeof zoom === "number" && zoom < 7) {
-      throw new Error("הזום נמוך מדי לשאילתת בניינים. תתקרב ואז תנסה שוב.");
-    }
-
-    const resp = await gm().intersectFeatures({
-      layerName: BUILDINGS_LAYER,
-      geometry: wkt,
-      fields: [BUILDING_ID_FIELD],
-      getShapes: true,
-    });
-
-    const items = Array.isArray(resp) ? resp : Array.isArray(resp?.data) ? resp.data : resp?.Data || [];
-    const parsed = [];
-
-    for (const it of items) {
-      const objectId = it?.objectid ?? it?.ObjectID ?? it?.OBJECTID ?? it?.id ?? "";
-      const values = it?.Values ?? it?.values ?? it?.Fields ?? it?.fields ?? [];
-      const joinKey = String(extractFieldValue(values, BUILDING_ID_FIELD) ?? "").trim();
-      if (!joinKey) continue;
-
-      const shape =
-        it?.Shape ??
-        it?.shape ??
-        it?.WKT ??
-        it?.wkt ??
-        it?.Geometry ??
-        it?.geometry ??
-        extractFieldValue(values, "SHAPE");
-
-      const geomWkt = typeof shape === "string" ? shape : "";
-
-      parsed.push(buildBuildingRecord({ objectId, joinKey, wkt: geomWkt }));
-    }
-
-    buildings.value = parsed;
-    await redrawOverlays();
-  } catch (err) {
-    topError.value = err?.message || String(err);
-  } finally {
-    loadingQuery.value = false;
-  }
-}
-
-/* =========================
-   DRAW OVERLAYS
-========================= */
-async function clearOverlays() {
-  if (!govReady.value) return;
-  try {
-    gm().clearGeometriesByName(["anom", "norm", "sel"]);
-  } catch (_) {}
-}
-
-async function redrawOverlays() {
-  if (!govReady.value) return;
-
-  await clearOverlays();
-
-  const anom = [];
-  const norm = [];
-
-  for (const b of buildings.value) {
-    if (!b.wkt || !b.wkt.toUpperCase().includes("POLYGON")) continue;
-    if (b.isAnomaly) anom.push(b);
-    else if (showNormals.value) norm.push(b);
-  }
-
-  const anomToDraw = anom.slice(0, MAX_DRAW_ANOMALIES);
-  const normToDraw = norm.slice(0, MAX_DRAW_NORMALS);
-
-  if (normToDraw.length) {
-    await gm().displayGeometries({
-      wkts: normToDraw.map((b) => b.wkt),
-      names: normToDraw.map(() => "norm"),
-      geometryType: gm().geometryType.POLYGON,
-      defaultSymbol: {
-        outlineColor: [0, 90, 255, 0.65],
-        outlineWidth: 1,
-        fillColor: [0, 90, 255, 0.10],
-      },
-      clearExistings: false,
-      clearExisting: false,
-      showBubble: false,
-      data: { tooltips: normToDraw.map((b) => `בניין ${b.joinKey}`) },
-    });
-  }
-
-  if (anomToDraw.length) {
-    await gm().displayGeometries({
-      wkts: anomToDraw.map((b) => b.wkt),
-      names: anomToDraw.map(() => "anom"),
-      geometryType: gm().geometryType.POLYGON,
-      defaultSymbol: {
-        outlineColor: [255, 0, 0, 1],
-        outlineWidth: 2,
-        fillColor: [255, 0, 0, 0.32],
-      },
-      clearExistings: false,
-      clearExisting: false,
-      showBubble: false,
-      data: {
-        tooltips: anomToDraw.map((b) => `חריג • ${b.joinKey} • ${formatRate(b.csv?.rate)}`),
-      },
-    });
-  }
-
-  // אם יש נבחר – נצייר אותו שוב מעל
-  if (selected.value?.wkt) {
-    await drawSelectedOverlay(selected.value);
-  }
-}
-
-async function drawSelectedOverlay(b) {
-  if (!govReady.value || !b?.wkt) return;
-  try {
-    gm().clearGeometriesByName(["sel"]);
-  } catch (_) {}
-
-  if (!b.wkt.toUpperCase().includes("POLYGON")) return;
-
-  await gm().displayGeometries({
-    wkts: [b.wkt],
-    names: ["sel"],
-    geometryType: gm().geometryType.POLYGON,
-    defaultSymbol: {
-      outlineColor: [255, 215, 0, 1],
-      outlineWidth: 3,
-      fillColor: [255, 215, 0, 0.14],
-    },
-    clearExistings: false,
-    clearExisting: false,
-    showBubble: false,
-    data: { tooltips: [`נבחר: ${b.joinKey}`] },
-  });
-}
-
-/* =========================
-   UI ACTIONS
-========================= */
 async function locateAddress() {
   if (!govReady.value || !addressQuery.value) return;
-  topError.value = "";
+  errorMsg.value = "";
+
   try {
-    const resp = await gm().geocode({
+    const resp = await window.govmap.geocode({
       keyword: addressQuery.value,
-      type: gm().geocodeType.AccuracyOnly,
+      type: window.govmap.geocodeType.AccuracyOnly,
     });
 
     const x = resp?.X ?? resp?.x ?? resp?.data?.X ?? resp?.data?.x;
     const y = resp?.Y ?? resp?.y ?? resp?.data?.Y ?? resp?.data?.y;
 
     if (typeof x !== "number" || typeof y !== "number") {
-      throw new Error("לא נמצאה תוצאה מדויקת. נסה לנסח כתובת אחרת/להוסיף מספר בית.");
+      throw new Error("לא נמצאה תוצאה מדויקת. נסה לנסח כתובת אחרת/להוסיף מספר.");
     }
 
-    gm().zoomToXY({ x, y, level: 9 });
-    gm().setMapMarker?.({ x, y });
-  } catch (err) {
-    topError.value = err?.message || String(err);
+    window.govmap.zoomToXY({ x, y, level: 9 });
+    window.govmap.setMapMarker?.({ x, y });
+    setToast("מיקום נמצא");
+  } catch (e) {
+    errorMsg.value = e?.message || String(e);
   }
 }
 
-function toggleAutoRefresh() {
-  autoRefresh.value = !autoRefresh.value;
-  toastMsg(autoRefresh.value ? "עדכון אוטומטי הופעל (Extent Change)" : "עדכון אוטומטי כובה");
-}
-
-function toggleClickPick() {
-  clickPickOn.value = !clickPickOn.value;
-  toastMsg(clickPickOn.value ? "לחיצה להצגת נתונים הופעלה" : "לחיצה להצגת נתונים כובתה");
-}
-
-async function highlightIdOnMap() {
-  if (!govReady.value || !idQuery.value) return;
-  topError.value = "";
+function clearMarker() {
   try {
-    // מדגיש במפה (לא מחזיר WKT) – אחרי זה המשתמש לוחץ על הבניין כדי לשלוף WKT + CSV
-    gm().searchInLayer({
-      layerName: BUILDINGS_LAYER,
-      fieldName: BUILDING_ID_FIELD,
-      fieldValues: [idQuery.value],
-      highlight: true,
-      showBubble: false,
-      outLineColor: [255, 215, 0, 1],
-      fillColor: [255, 215, 0, 0.18],
-    });
-
-    toastMsg("הודגש במפה. עכשיו לחץ על הבניין כדי לראות נתוני CSV.");
-  } catch (err) {
-    topError.value = err?.message || String(err);
-  }
+    window.govmap.clearMapMarker?.();
+  } catch (_) {}
 }
 
-function openCsvOnlyById() {
-  const rec = lookupCsv(idQuery.value);
-  if (!rec) {
-    toastMsg("לא נמצאו נתוני CSV ל־ID הזה.");
+async function findByObjectId() {
+  const id = String(objectIdQuery.value || "").trim();
+  if (!id) return;
+
+  // If we already have it in the loaded set, just select
+  const hit = buildings.value.find((b) => String(b.objectId) === id);
+  if (hit) {
+    await selectBuilding(hit);
     return;
   }
-  selected.value = {
-    key: `csvonly__${normalizeId(idQuery.value)}`,
-    objectId: "",
-    joinKey: normalizeId(idQuery.value),
-    wkt: "",
-    csv: rec,
-    isAnomaly: typeof rec.rate === "number" ? Math.abs(rec.rate) >= Number(rateThreshold.value) : false,
-  };
-  tab.value = "selected";
+
+  // Otherwise: we cannot query by objectid directly without whereClause unless you use searchInLayer.
+  // So we just select from CSV if exists and tell user to click building or load rectangle around it.
+  const csv = csvIndex.value.get(id);
+  if (!csv) {
+    setToast("לא נמצא objectid כזה ב־CSV");
+  } else {
+    setToast("נמצא ב־CSV — עכשיו לחץ על הבניין במפה כדי לבחור אותו");
+  }
 }
 
 async function selectBuilding(b) {
   selected.value = b;
   tab.value = "selected";
   await drawSelectedOverlay(b);
-  await updateMarkerToBuilding(b);
 }
 
-async function zoomToSelected() {
-  if (!selected.value?.wkt) return;
+function zoomToSelected() {
+  if (!selected.value?.wkt || !String(selected.value.wkt).toUpperCase().includes("POLYGON")) return;
   const c = centroidFromPolygonWkt(selected.value.wkt);
   if (!c) return;
-  gm().zoomToXY({ x: c.x, y: c.y, level: 10 });
-  gm().setMapMarker?.({ x: c.x, y: c.y });
+  window.govmap.zoomToXY?.({ x: c.x, y: c.y, level: 9 });
+  window.govmap.setMapMarker?.({ x: c.x, y: c.y });
 }
 
-function clearSelection() {
-  selected.value = null;
+async function copyObjectId() {
+  const id = selected.value?.objectId;
+  if (!id) return;
   try {
-    gm().clearGeometriesByName(["sel"]);
-  } catch (_) {}
-}
-
-async function updateMarkerToBuilding(b) {
-  const c = centroidFromPolygonWkt(b.wkt);
-  if (!c) return;
-  try {
-    gm().setMapMarker?.({ x: c.x, y: c.y });
-  } catch (_) {}
-}
-
-async function reloadCsv() {
-  await loadCsv();
-}
-
-/* =========================
-   HELPERS
-========================= */
-function toastMsg(msg) {
-  toast.value = msg;
-  setTimeout(() => {
-    if (toast.value === msg) toast.value = "";
-  }, 3500);
-}
-
-function formatRate(v) {
-  if (typeof v !== "number" || !Number.isFinite(v)) return "—";
-  return `${v.toFixed(2)} mm/yr`;
-}
-
-function extractFieldValue(values, fieldName) {
-  if (!values) return null;
-
-  if (Array.isArray(values)) {
-    const hit = values.find((x) => {
-      const n = x?.FieldName ?? x?.fieldName ?? x?.name ?? x?.Field ?? x?.field ?? "";
-      return String(n).toLowerCase() === String(fieldName).toLowerCase();
-    });
-    if (hit) return hit?.Value ?? hit?.value ?? hit?.val ?? null;
-  } else if (typeof values === "object") {
-    const keys = Object.keys(values);
-    const k = keys.find((k0) => k0.toLowerCase() === String(fieldName).toLowerCase());
-    return k ? values[k] : null;
+    await navigator.clipboard.writeText(String(id));
+    setToast("הועתק");
+  } catch {
+    setToast(String(id));
   }
-
-  return null;
 }
 
+/**
+ * =========================
+ * Geometry helpers
+ * =========================
+ */
 function extentToWkt(ext) {
   const xmin = ext?.xmin ?? ext?.XMin ?? ext?.XMIN;
   const ymin = ext?.ymin ?? ext?.YMin ?? ext?.YMIN;
@@ -975,6 +863,7 @@ function extentToWkt(ext) {
 
 function centroidFromPolygonWkt(wkt) {
   if (!wkt || typeof wkt !== "string") return null;
+
   const m = wkt.match(/POLYGON\s*\(\(\s*([^)]+?)\s*\)\)/i);
   if (!m) return null;
 
@@ -1006,421 +895,168 @@ function centroidFromPolygonWkt(wkt) {
   return { x: cx, y: cy };
 }
 
-/* =========================
-   LIFECYCLE
-========================= */
+/**
+ * =========================
+ * Derived lists
+ * =========================
+ */
+const anomalies = computed(() =>
+  buildings.value
+    .filter((b) => b.isAnomaly)
+    .sort((a, b) => Math.abs(b.csv?.rate ?? 0) - Math.abs(a.csv?.rate ?? 0))
+);
+
+const anomaliesFiltered = computed(() => {
+  const f = anomsFilter.value.trim();
+  const arr = anomalies.value.slice(0, 2500); // avoid huge DOM
+  if (!f) return arr;
+  return arr.filter((b) => String(b.objectId).includes(f));
+});
+
+/**
+ * =========================
+ * Watchers
+ * =========================
+ */
+watch(rateThreshold, async () => {
+  buildings.value = buildings.value.map(applyCsvJoinAndAnom);
+  if (selected.value) selected.value = applyCsvJoinAndAnom(selected.value);
+  await redrawOverlays();
+});
+
+/**
+ * =========================
+ * Mount
+ * =========================
+ */
 onMounted(async () => {
   try {
     await initGovMap();
+    await reloadCsv();
   } catch (e) {
-    topError.value = e?.message || String(e);
+    errorMsg.value = e?.message || String(e);
   }
-  await loadCsv();
-});
-
-/* =========================
-   WATCHERS
-========================= */
-watch([rateThreshold, showNormals], async () => {
-  // עדכון חריגות/תצוגה
-  buildings.value = buildings.value.map((b) => buildBuildingRecord({ objectId: b.objectId, joinKey: b.joinKey, wkt: b.wkt }));
-  await redrawOverlays();
 });
 </script>
 
 <style scoped>
-/* Layout */
-.app {
-  height: 100vh;
-  width: 100%;
-  display: grid;
-  grid-template-columns: 390px 1fr;
-  background: #f3f5fa;
-  overflow: hidden;
-}
-
-.panel {
-  height: 100%;
-  overflow: auto;
-  background: #ffffff;
-  border-left: 1px solid #e8ebf5;
-  padding: 12px 12px 16px;
-}
-
-/* Header */
-.panelHeader {
+/* layout */
+.app { height: 100vh; width: 100%; background: #f5f7fb; overflow: hidden; display: flex; flex-direction: column; }
+.topbar {
+  height: 58px;
+  background: #0f172a;
+  color: #fff;
   display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 10px;
-  padding: 8px 6px 12px;
-}
-
-.brand .title {
-  font-weight: 900;
-  font-size: 18px;
-  letter-spacing: 0.2px;
-}
-.brand .subtitle {
-  margin-top: 4px;
-  font-size: 12px;
-  color: #5e667a;
-  line-height: 1.25;
-}
-
-.iconBtn {
-  border: 1px solid #e0e5f3;
-  background: #fff;
-  border-radius: 12px;
-  width: 38px;
-  height: 38px;
-  cursor: pointer;
-}
-
-/* Tabs */
-.tabs {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 8px;
-  padding: 0 4px 10px;
-}
-.tab {
-  border: 1px solid #e7ebf7;
-  background: #fbfcff;
-  border-radius: 12px;
-  padding: 9px 10px;
-  font-weight: 800;
-  font-size: 13px;
-  cursor: pointer;
-  color: #2d3342;
-}
-.tab.on {
-  border-color: #2a62ff;
-  box-shadow: 0 0 0 3px rgba(42, 98, 255, 0.10);
-}
-
-/* Status */
-.statusBar {
-  display: flex;
-  gap: 8px;
-  padding: 0 4px 10px;
-  flex-wrap: wrap;
-}
-.pill {
-  display: inline-flex;
   align-items: center;
-  gap: 8px;
-  padding: 7px 10px;
-  border-radius: 999px;
-  border: 1px solid #e7ebf7;
-  background: #fbfcff;
-  font-size: 12px;
-  font-weight: 800;
-  color: #5b647a;
+  justify-content: space-between;
+  padding: 0 12px;
+  gap: 12px;
 }
-.pill .dot {
-  width: 9px;
-  height: 9px;
-  border-radius: 99px;
-  background: #c8cfdf;
-}
-.pill.ok {
-  color: #1c6b3a;
-  border-color: #d9f0e3;
-  background: #f2fbf6;
-}
-.pill.ok .dot {
-  background: #22c55e;
-}
+.brand .title { font-weight: 900; letter-spacing: 0.2px; }
+.brand .subtitle { font-size: 12px; opacity: 0.8; margin-top: 2px; }
 
-/* Boxes */
-.box {
-  border: 1px solid #eef1fb;
-  border-radius: 16px;
-  padding: 12px;
-  margin: 10px 4px;
-  background: #fbfcff;
-}
-.boxTitle {
-  font-weight: 900;
-  margin-bottom: 10px;
-  color: #1f2430;
-}
-.boxTitle.small {
-  font-size: 13px;
-  margin-bottom: 8px;
-}
+.body { flex: 1; display: grid; grid-template-columns: 420px 1fr; min-height: 0; }
 
-.row {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 6px;
-  margin: 10px 0;
-}
-.row2 {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 10px;
-  margin-top: 10px;
-}
-
-.lbl {
-  font-size: 13px;
-  font-weight: 800;
-  color: #2c3342;
-}
-.inp {
-  width: 100%;
-  padding: 10px 11px;
-  border: 1px solid #e0e5f3;
+.panel { background: #fff; border-left: 1px solid #e7e9f2; padding: 12px; overflow: auto; }
+.tabs { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 10px; }
+.tab {
+  border: 1px solid #e6e8f2;
+  background: #f8fafc;
+  padding: 10px 8px;
   border-radius: 12px;
-  outline: none;
-  background: #fff;
-  font-size: 14px;
+  cursor: pointer;
+  font-weight: 800;
 }
+.tab.on { background: #0ea5e9; color: #fff; border-color: #0ea5e9; }
+
+.card { border: 1px solid #eef0f7; border-radius: 16px; padding: 12px; background: #fbfbfe; margin-bottom: 12px; }
+.cardTitle { font-weight: 900; margin-bottom: 10px; }
+
+.row { display: grid; grid-template-columns: 1fr; gap: 8px; margin: 10px 0; }
+.row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 8px; }
+
+.lbl { font-size: 13px; color: #334155; font-weight: 700; }
+.inp {
+  width: 100%; padding: 10px 10px;
+  border: 1px solid #e2e5f0; border-radius: 12px; outline: none; background: #fff;
+}
+.inp:focus { border-color: #0ea5e9; box-shadow: 0 0 0 3px rgba(14,165,233,.15); }
 
 .btn {
   padding: 10px 12px;
-  border-radius: 14px;
-  border: 1px solid #2a62ff;
-  background: #2a62ff;
+  border-radius: 12px;
+  border: 1px solid #0ea5e9;
+  background: #0ea5e9;
   color: #fff;
   cursor: pointer;
   font-weight: 900;
 }
-.btn:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-.btn.ghost {
-  background: #fff;
-  color: #2a62ff;
-}
+.btn.ghost { background: #fff; color: #0ea5e9; }
+.btn:disabled { opacity: .6; cursor: not-allowed; }
+.btn.on { background: #16a34a; border-color: #16a34a; color: #fff; }
 
-.sep {
-  height: 1px;
-  background: #eef1fb;
-  margin: 12px 0;
-}
+.top-actions { display: flex; gap: 8px; align-items: center; }
 
-.hint {
-  margin-top: 10px;
-  font-size: 12px;
-  color: #6a7287;
-  line-height: 1.5;
-}
+.sep { height: 1px; background: #eef0f7; margin: 12px 0; }
 
-/* Stats */
-.stats {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 10px;
-}
-.stat {
-  border: 1px solid #eef1fb;
-  border-radius: 14px;
-  padding: 10px;
-  background: #fff;
-}
-.stat .k {
-  font-size: 12px;
-  color: #6a7287;
-  font-weight: 800;
-}
-.stat .v {
-  font-size: 15px;
-  font-weight: 900;
-  margin-top: 2px;
-  color: #1f2430;
-}
+.info { display: flex; justify-content: space-between; align-items: baseline; padding: 8px 10px; border: 1px solid #eef0f7; border-radius: 12px; background: #fff; margin-top: 8px; }
+.info .k { font-size: 12px; color: #64748b; }
+.info .v { font-size: 13px; font-weight: 900; color: #0f172a; }
 
-/* List */
-.list {
-  display: grid;
-  gap: 8px;
-}
+.err { margin-top: 10px; padding: 10px; border-radius: 12px; background: #fff1f1; border: 1px solid #ffd0d0; color: #b3261e; font-size: 13px; }
+.muted { color: #64748b; font-size: 13px; }
+.muted.small { font-size: 12px; line-height: 1.5; }
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+
+.list { display: grid; gap: 8px; margin-top: 10px; }
 .listItem {
   text-align: right;
   padding: 10px;
   border-radius: 14px;
-  border: 1px solid #eef1fb;
+  border: 1px solid #eef0f7;
   background: #fff;
   cursor: pointer;
 }
-.listItem.on {
-  border-color: #2a62ff;
-  box-shadow: 0 0 0 3px rgba(42, 98, 255, 0.10);
-}
-.liTop {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  gap: 10px;
-}
-.liId {
-  font-weight: 900;
-}
-.liRate {
-  font-weight: 900;
-  color: #b3261e;
-}
-.liSub {
-  margin-top: 6px;
-  font-size: 12px;
-  color: #6a7287;
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-.dotSep {
-  opacity: 0.55;
-}
+.listItem.on { border-color: #0ea5e9; box-shadow: 0 0 0 3px rgba(14,165,233,.15); }
+.liTop { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
+.liId { font-weight: 900; color: #0f172a; }
+.liRate { font-weight: 900; color: #b91c1c; }
+.liSub { margin-top: 6px; font-size: 12px; color: #64748b; }
 
-/* Selected KV */
-.kv {
-  display: grid;
-  grid-template-columns: 120px 1fr;
-  gap: 8px 10px;
-}
-.kv .k {
-  font-size: 12px;
-  color: #6a7287;
-  font-weight: 800;
-}
-.kv .v {
-  font-size: 13px;
-  font-weight: 900;
-  color: #1f2430;
-}
+.kv { display: grid; grid-template-columns: 110px 1fr; gap: 8px 10px; }
+.kv .k { font-size: 12px; color: #64748b; }
+.kv .v { font-size: 13px; font-weight: 900; color: #0f172a; }
 
-/* CSV preview */
-.csvTable {
-  border: 1px solid #eef1fb;
-  border-radius: 14px;
-  overflow: hidden;
-  background: #fff;
-}
-.csvRow {
-  display: grid;
-  grid-auto-flow: column;
-  grid-auto-columns: minmax(0, 1fr);
-}
-.csvRow + .csvRow {
-  border-top: 1px solid #eef1fb;
-}
-.csvHead {
-  background: #f6f8ff;
-  font-weight: 900;
-}
-.cell {
-  padding: 8px 10px;
-  font-size: 12px;
-  border-left: 1px solid #eef1fb;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.csvRow .cell:first-child {
-  border-left: none;
-}
+.mapWrap { position: relative; min-height: 0; }
+.map { height: 100%; width: 100%; background: #dfe6f6; }
 
-/* Errors */
-.errTop {
-  margin: 6px 4px 0;
-  padding: 10px;
-  border-radius: 14px;
-  background: #fff1f1;
-  border: 1px solid #ffd0d0;
-  color: #b3261e;
-  font-size: 13px;
-  font-weight: 800;
-}
-.err {
-  padding: 10px;
-  border-radius: 14px;
-  background: #fff1f1;
-  border: 1px solid #ffd0d0;
-  color: #b3261e;
-  font-size: 13px;
-  font-weight: 800;
-}
-.muted {
-  color: #6a7287;
-  font-size: 13px;
-}
-.muted.small {
-  font-size: 12px;
-  line-height: 1.5;
-}
-.mt8 { margin-top: 8px; }
-.mt12 { margin-top: 12px; }
-
-/* Map */
-.mapWrap {
-  position: relative;
-  height: 100%;
-  width: 100%;
-}
-.map {
-  height: 100%;
-  width: 100%;
-  background: #dfe6f6;
-}
-
-/* Toast */
+/* toast */
 .toast {
   position: absolute;
-  left: 14px;
-  bottom: 14px;
+  left: 12px;
+  bottom: 12px;
+  background: rgba(15, 23, 42, 0.92);
+  color: #fff;
   padding: 10px 12px;
   border-radius: 14px;
-  background: rgba(30, 34, 45, 0.92);
-  color: #fff;
-  font-size: 13px;
   font-weight: 800;
-  cursor: pointer;
-  max-width: min(520px, calc(100% - 28px));
+  font-size: 13px;
 }
 
-/* Toggle */
-.switch {
-  position: relative;
-  width: 46px;
-  height: 26px;
-  display: inline-block;
-}
+/* toggle switch */
+.switch { position: relative; width: 46px; height: 26px; display: inline-block; }
 .switch input { display: none; }
-.switch span {
-  position: absolute;
-  inset: 0;
-  background: #d7dbea;
-  border-radius: 999px;
-  transition: 0.2s;
-}
+.switch span { position: absolute; inset: 0; background: #d7dbea; border-radius: 999px; transition: .2s; }
 .switch span::after {
-  content: "";
-  position: absolute;
-  top: 3px;
-  right: 3px;
-  width: 20px;
-  height: 20px;
-  background: #fff;
-  border-radius: 999px;
-  transition: 0.2s;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+  content: ""; position: absolute; top: 3px; right: 3px;
+  width: 20px; height: 20px; background: #fff; border-radius: 999px;
+  transition: .2s; box-shadow: 0 2px 8px rgba(0,0,0,.08);
 }
-.switch input:checked + span { background: #2a62ff; }
+.switch input:checked + span { background: #0ea5e9; }
 .switch input:checked + span::after { transform: translateX(-20px); }
 
 @media (max-width: 980px) {
-  .app {
-    grid-template-columns: 1fr;
-    grid-template-rows: auto 1fr;
-  }
-  .panel {
-    position: sticky;
-    top: 0;
-    z-index: 2;
-  }
+  .body { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
+  .panel { position: sticky; top: 0; z-index: 2; }
 }
 </style>
