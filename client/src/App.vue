@@ -171,7 +171,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
  */
 
 // מומלץ: לשים ב-.env:  VITE_GOVMAP_TOKEN=xxxx
-const GOVMAP_TOKEN = import.meta?.env?.VITE_GOVMAP_TOKEN || "ede9a5fd-7c23-432f-8ffb-d85feffa3f3c";
+const GOVMAP_TOKEN = "ede9a5fd-7c23-432f-8ffb-d85feffa3f3c";
 
 // שכבת הבניינים שלך ב־GovMap (אצלך דיברנו בעבר על 225287)
 const BUILDINGS_LAYER = "225287";
@@ -276,9 +276,9 @@ async function initGovMap() {
   errorMsg.value = "";
   await loadGovMapScript();
 
-  if (!GOVMAP_TOKEN || GOVMAP_TOKEN.includes("ede9a5fd-7c23-432f-8ffb-d85feffa3f3c")) {
-    throw new Error("חסר GOVMAP_TOKEN. שים טוקן אמיתי ב-.env או בקוד.");
-  }
+if (!GOVMAP_TOKEN) {
+  throw new Error("חסר GOVMAP_TOKEN. שים טוקן אמיתי ב-.env או בקוד.");
+}
 
   // יצירת המפה (הגדרות בסיס)
   window.govmap.createMap("map", {
