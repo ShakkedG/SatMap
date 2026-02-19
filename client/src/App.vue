@@ -181,7 +181,8 @@ const BUILDING_ID_FIELD = "ID";
 
 // URL לנתוני בניינים (מה־API של crimesmap/האתר הקודם שלך)
 // אפשר גם לשים קובץ ב-public למשל: /building_data.json
-const BUILDING_DATA_URL = "/building_data.json";
+const BUILDING_DATA_URL = new URL("building_data.json", import.meta.env.BASE_URL).toString();
+
 
 /**
  * איך נראה רשומת נתוני בניין מה־API?
