@@ -133,7 +133,7 @@
           אם בניין לא נמצא ב-CSV → הוא מוגדר <b>no_data</b>.
         </div>
         <div class="hint">
-          אם אתה עדיין מקבל 404 — תפתח בדפדפן את <b>/SatMap/data/tablescv.csv</b> ותבדוק שזה באמת נפתח.
+          אם אתה עדיין מקבל 404 — תפתח בדפדפן את <b>/SatMap/data/tablecsv.csv</b> ותבדוק שזה באמת נפתח.
         </div>
       </section>
     </aside>
@@ -170,7 +170,7 @@ const DEFAULT_Y = 663500;
 const DEFAULT_LEVEL = 9;
 
 // שם הקובץ כפי שהוא נמצא תחת public/data/
-const CSV_FILE = "tablescv.csv";
+const CSV_FILE = "tablecsv.csv";
 
 /** ========================= */
 
