@@ -184,7 +184,8 @@ const BUILDING_ID_FIELD = "ID";
  * client/public/data/tablecsv.csv
  * לכן ב-build זה יהיה: <BASE_URL>/data/tablecsv.csv
  */
-const BUILDING_DATA_URL = new URL("data/tablecsv.csv", import.meta.env.BASE_URL).toString();
+const BASE_URL = (import.meta?.env?.BASE_URL || "/").replace(/\/?$/, "/");
+const BUILDING_DATA_URL = `${BASE_URL}data/tablecsv.csv`;
 
 /**
  * אם אתה יודע בוודאות את שמות העמודות ב-CSV — תוכל לשים כאן.
