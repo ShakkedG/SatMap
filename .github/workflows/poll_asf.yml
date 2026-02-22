@@ -1,0 +1,21 @@
+name: Poll ASF Scenes
+
+on:
+  schedule:
+    - cron: "0 3 * * *"   # כל יום 03:00 UTC
+  workflow_dispatch:
+
+jobs:
+  poll:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install requests psycopg[binary]
+      - run: python pipeline/poll_asf.py
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          AOI_WKT: ${{ secrets.AOI_WKT }}
+          DATE_START: "2025-01-01"
