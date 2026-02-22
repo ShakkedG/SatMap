@@ -28,6 +28,21 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
+      - name: Normalize App.vue (strip BOM + CRLF)
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path("client/src/App.vue")
+          b = p.read_bytes()
+          if b.startswith(b"\xef\xbb\xbf"):
+              b = b[3:]
+              print("Stripped UTF-8 BOM")
+          # normalize CRLF -> LF
+          b = b.replace(b"\r\n", b"\n")
+          p.write_bytes(b)
+          print("Normalized line endings")
+          PY
+
           
       - name: Debug App.vue
         run: |
