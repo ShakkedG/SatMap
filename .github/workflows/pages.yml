@@ -28,6 +28,14 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
+          
+      - name: Debug App.vue
+        run: |
+          echo "===== ls client/src ====="
+          ls -la client/src || true
+          echo "===== first 30 lines of client/src/App.vue ====="
+          sed -n '1,30p' client/src/App.vue || true
+
 
       - name: Install dependencies
         working-directory: client
