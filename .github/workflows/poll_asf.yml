@@ -3,27 +3,23 @@ name: Poll ASF Scenes
 on:
   workflow_dispatch:
   schedule:
-    - cron: "0 */6 * * *"   # כל 6 שעות
+    - cron: "0 */6 * * *"
 
 jobs:
   poll:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-
-      - name: Install deps
-        run: pip install requests psycopg[binary]
-
+      - run: pip install requests
       - name: Run poller
         run: python pipeline/poll_asf.py
         env:
-          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           AOI_WKT: ${{ secrets.AOI_WKT }}
           DAYS_BACK: "14"
           MAX_RESULTS: "2000"
+          BATCH_SIZE: "500"
