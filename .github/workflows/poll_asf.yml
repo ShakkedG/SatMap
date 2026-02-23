@@ -20,39 +20,10 @@ jobs:
       - name: Install deps
         run: pip install requests psycopg[binary]
 
-      # דיבאג בטוח: בודק שה-Secrets באמת הגיעו, ומפרק את ה-DB URL בלי סיסמה
-      - name: Debug secrets + DB URL parts (safe)
-        run: |
-          python - <<'PY'
-          import os
-          from urllib.parse import urlparse
-
-          db = os.getenv("SUPABASE_DB_URL","")
-          aoi = os.getenv("AOI_WKT","")
-
-          print("SUPABASE_DB_URL set:", bool(db))
-          print("AOI_WKT set:", bool(aoi))
-          print("AOI_WKT length:", len(aoi))
-
-          if db:
-            p = urlparse(db)
-            print("DB scheme:", p.scheme)
-            print("DB host:", p.hostname)   # דומיין זה בסדר
-            print("DB port:", p.port)
-            print("DB user:", p.username)
-            print("DB name:", (p.path or "").lstrip("/"))
-            print("DB has sslmode:", "sslmode=" in (p.query or ""))
-          PY
-        env:
-          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
-          AOI_WKT: ${{ secrets.AOI_WKT }}
-
       - name: Run poller
         run: python pipeline/poll_asf.py
         env:
           SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
           AOI_WKT: ${{ secrets.AOI_WKT }}
-          # אם תרצה: תאריך קבוע במקום DAYS_BACK
-          # AFTER: "2026-02-01"
           DAYS_BACK: "14"
           MAX_RESULTS: "2000"
