@@ -1,0 +1,24 @@
+name: Poll HyP3 status
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "*/30 * * * *"  # כל 30 דקות
+
+jobs:
+  poll:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install requests
+      - name: Poll HyP3 jobs
+        run: python pipeline/poll_hyp3.py
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          EDL_TOKEN: ${{ secrets.EDL_TOKEN }}
+          HYP3_API_URL: "https://hyp3-api.asf.alaska.edu"
+          POLL_LIMIT: "20"
