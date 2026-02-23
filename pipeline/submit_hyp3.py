@@ -13,11 +13,10 @@ EDL_TOKEN = os.getenv("EDL_TOKEN", "").strip()
 
 SUBMIT_LIMIT = int(os.getenv("SUBMIT_LIMIT", "3"))
 
-# INSAR_GAMMA params
-LOOKS = os.getenv("HYP3_LOOKS", "10x2").strip()  # usually '10x2' or '20x4'
-INCLUDE_DISPLACEMENT_MAPS = os.getenv("INCLUDE_DISPLACEMENT_MAPS", "true").strip().lower() == "true"
-INCLUDE_LOOK_VECTORS = os.getenv("INCLUDE_LOOK_VECTORS", "false").strip().lower() == "true"
-APPLY_WATER_MASK = os.getenv("APPLY_WATER_MASK", "false").strip().lower() == "true"
+# INSAR_GAMMA params (לפי הדוקס)
+LOOKS = os.getenv("HYP3_LOOKS", "10x2").strip()  # למשל 10x2 / 5x1
+INCLUDE_LOOK_VECTORS = os.getenv("INCLUDE_LOOK_VECTORS", "true").strip().lower() == "true"
+INCLUDE_LOS_DISPLACEMENT = os.getenv("INCLUDE_LOS_DISPLACEMENT", "true").strip().lower() == "true"
 
 
 def sb_headers():
@@ -79,12 +78,26 @@ def hyp3_pick_root(base: str) -> str:
     return base
 
 
+def clean_granule_id(g: str) -> str:
+    """
+    HyP3 API מצפה ל-ESA granule IDs (ללא '-SLC').
+    אם מגיע מה-ASF עם '-SLC' בסוף – נוריד.
+    """
+    g = (g or "").strip()
+    if g.endswith("-SLC"):
+        g = g[:-4]
+    return g
+
+
 def hyp3_post_jobs(payload: dict) -> dict:
     root = hyp3_pick_root(HYP3_API_URL)
     url = f"{root}/jobs"
 
     print(f"[HyP3] POST {url}")
     print(f"[HyP3] jobs count: {len(payload.get('jobs', []))}")
+    if payload.get("jobs"):
+        print("[HyP3] sample job (sanitized):")
+        print(json.dumps(payload["jobs"][0], indent=2)[:1200])
 
     r = requests.post(url, headers=hyp3_headers(), json=payload, timeout=180)
     print(f"[HyP3] status: {r.status_code}")
@@ -132,15 +145,14 @@ def main():
     jobs = []
     for p in pairs:
         pair_key = p["pair_key"]
-        ref_g = p["ref_granule_id"]
-        sec_g = p["sec_granule_id"]
+        ref_g = clean_granule_id(p["ref_granule_id"])
+        sec_g = clean_granule_id(p["sec_granule_id"])
 
         job_parameters = {
             "granules": [ref_g, sec_g],
             "looks": LOOKS,
-            "include_displacement_maps": INCLUDE_DISPLACEMENT_MAPS,
             "include_look_vectors": INCLUDE_LOOK_VECTORS,
-            "apply_water_mask": APPLY_WATER_MASK,
+            "include_los_displacement": INCLUDE_LOS_DISPLACEMENT,
         }
 
         jobs.append({
@@ -150,8 +162,8 @@ def main():
         })
 
     payload = {"jobs": jobs}
-
     resp = hyp3_post_jobs(payload)
+
     hyp3_jobs = resp.get("jobs", []) if isinstance(resp, dict) else []
     print("HyP3 returned jobs:", len(hyp3_jobs))
 
