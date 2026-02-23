@@ -12,8 +12,12 @@ HYP3_API_URL = os.getenv("HYP3_API_URL", "https://hyp3-api.asf.alaska.edu").stri
 EDL_TOKEN = os.getenv("EDL_TOKEN", "").strip()
 
 SUBMIT_LIMIT = int(os.getenv("SUBMIT_LIMIT", "3"))
-LOOKS = os.getenv("HYP3_LOOKS", "10x2").strip()
-INCLUDE_LOS = os.getenv("INCLUDE_LOS", "true").strip().lower() == "true"
+
+# INSAR_GAMMA params
+LOOKS = os.getenv("HYP3_LOOKS", "10x2").strip()  # usually '10x2' or '20x4'
+INCLUDE_DISPLACEMENT_MAPS = os.getenv("INCLUDE_DISPLACEMENT_MAPS", "true").strip().lower() == "true"
+INCLUDE_LOOK_VECTORS = os.getenv("INCLUDE_LOOK_VECTORS", "false").strip().lower() == "true"
+APPLY_WATER_MASK = os.getenv("APPLY_WATER_MASK", "false").strip().lower() == "true"
 
 
 def sb_headers():
@@ -75,16 +79,20 @@ def hyp3_pick_root(base: str) -> str:
     return base
 
 
-def hyp3_post_job(job_obj: dict) -> dict:
+def hyp3_post_jobs(payload: dict) -> dict:
     root = hyp3_pick_root(HYP3_API_URL)
     url = f"{root}/jobs"
+
     print(f"[HyP3] POST {url}")
-    r = requests.post(url, headers=hyp3_headers(), json=job_obj, timeout=120)
+    print(f"[HyP3] jobs count: {len(payload.get('jobs', []))}")
+
+    r = requests.post(url, headers=hyp3_headers(), json=payload, timeout=180)
     print(f"[HyP3] status: {r.status_code}")
     if r.status_code >= 400:
-        print("[HyP3] body (first 1200):")
-        print(r.text[:1200])
+        print("[HyP3] body (first 2000):")
+        print(r.text[:2000])
         r.raise_for_status()
+
     return r.json()
 
 
@@ -115,52 +123,63 @@ def main():
             "limit": str(SUBMIT_LIMIT),
         },
     )
+
     print("Pairs fetched:", len(pairs))
     if not pairs:
+        print("No pairs with status=new")
         return
 
-    now = datetime.now(timezone.utc).isoformat()
-    hyp3_rows = []
-
+    jobs = []
     for p in pairs:
         pair_key = p["pair_key"]
         ref_g = p["ref_granule_id"]
         sec_g = p["sec_granule_id"]
 
-        job_obj = {
-            "name": short_name(pair_key),
-            "job_type": "INSAR_GAMMA",
-            "job_parameters": {
-                "granules": [ref_g, sec_g],
-                "looks": LOOKS,
-                "include_los_displacement": INCLUDE_LOS,
-            },
+        job_parameters = {
+            "granules": [ref_g, sec_g],
+            "looks": LOOKS,
+            "include_displacement_maps": INCLUDE_DISPLACEMENT_MAPS,
+            "include_look_vectors": INCLUDE_LOOK_VECTORS,
+            "apply_water_mask": APPLY_WATER_MASK,
         }
 
-        # שליחה ל-HyP3 (job אחד)
-        resp = hyp3_post_job(job_obj)
+        jobs.append({
+            "name": short_name(pair_key),
+            "job_type": "INSAR_GAMMA",
+            "job_parameters": job_parameters,
+        })
 
-        job_id = resp.get("job_id") or resp.get("id")
-        status_code = resp.get("status_code") or "RUNNING"
+    payload = {"jobs": jobs}
+
+    resp = hyp3_post_jobs(payload)
+    hyp3_jobs = resp.get("jobs", []) if isinstance(resp, dict) else []
+    print("HyP3 returned jobs:", len(hyp3_jobs))
+
+    now = datetime.now(timezone.utc).isoformat()
+    rows = []
+    for idx, p in enumerate(pairs):
+        pair_key = p["pair_key"]
+        j = hyp3_jobs[idx] if idx < len(hyp3_jobs) else {}
+        job_id = j.get("job_id") or j.get("id")
+        status_code = j.get("status_code") or "RUNNING"
+
         if not job_id:
-            raise RuntimeError(f"Missing job_id for pair {pair_key}. Response: {json.dumps(resp)[:800]}")
+            raise RuntimeError(f"Missing job_id for pair {pair_key}. Job: {json.dumps(j)[:800]}")
 
-        status_norm = normalize_status(status_code)
-
-        hyp3_rows.append({
+        rows.append({
             "job_id": job_id,
             "pair_key": pair_key,
             "product_type": "INSAR_GAMMA",
-            "status": status_norm,
+            "status": normalize_status(status_code),
             "submitted_at": now,
             "updated_at": now,
-            "result_meta": resp,
+            "result_meta": j,
         })
 
         sb_patch("pairs", f"?pair_key=eq.{pair_key}", {"status": "submitted"})
 
-    sb_upsert("hyp3_jobs", hyp3_rows, on_conflict="job_id")
-    print("Saved hyp3_jobs:", len(hyp3_rows), "and marked pairs=submitted")
+    sb_upsert("hyp3_jobs", rows, on_conflict="job_id")
+    print("Saved hyp3_jobs:", len(rows), "and marked pairs=submitted")
 
 
 if __name__ == "__main__":
