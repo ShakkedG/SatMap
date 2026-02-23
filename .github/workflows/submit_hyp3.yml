@@ -1,0 +1,29 @@
+name: Submit HyP3 (fast)
+
+on:
+  workflow_dispatch:
+    inputs:
+      submit_limit:
+        description: "How many new pairs to submit"
+        required: true
+        default: "3"
+
+jobs:
+  submit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install requests
+      - name: Submit HyP3 jobs
+        run: python pipeline/submit_hyp3.py
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          EDL_TOKEN: ${{ secrets.EDL_TOKEN }}
+          SUBMIT_LIMIT: ${{ inputs.submit_limit }}
+          HYP3_API_URL: "https://hyp3-api.asf.alaska.edu"
+          HYP3_LOOKS: "10x2"
+          INCLUDE_LOS: "true"
