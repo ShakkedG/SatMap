@@ -56,7 +56,7 @@ def asf_search(aoi_wkt: str, start_date: str):
 
 def upsert_scenes(features):
     # חיבור DB
-    with psycopg.connect(SUPABASE_DB_URL) as con:
+  with psycopg.connect(SUPABASE_DB_URL, prepare_threshold=0) as con:
         inserted = 0
         for f in features:
             p = f.get("properties", {}) or {}
