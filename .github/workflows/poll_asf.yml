@@ -37,17 +37,11 @@ jobs:
           if db:
             p = urlparse(db)
             print("DB scheme:", p.scheme)
-            print("DB host:", p.hostname)
+            print("DB host:", p.hostname)   # דומיין זה בסדר
             print("DB port:", p.port)
             print("DB user:", p.username)
             print("DB name:", (p.path or "").lstrip("/"))
             print("DB has sslmode:", "sslmode=" in (p.query or ""))
-
-            # בדיקות שמסבירות את השגיאה שלך "Tenant or user not found"
-            if p.username and not p.username.startswith("postgres."):
-              print("WARN: username does not start with 'postgres.' -> pooler may say Tenant or user not found")
-            if p.hostname and "pooler.supabase.com" not in p.hostname:
-              print("WARN: host is not pooler.supabase.com -> IPv4/direct mismatch likely")
           PY
         env:
           SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
