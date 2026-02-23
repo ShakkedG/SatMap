@@ -4,30 +4,17 @@ import json
 import requests
 import psycopg
 from datetime import datetime, timezone, timedelta
-from urllib.parse import urlparse
 
 SUPABASE_DB_URL = os.getenv("SUPABASE_DB_URL", "").strip()
 AOI_WKT = os.getenv("AOI_WKT", "").strip()
 
-DAYS_BACK = int(os.getenv("DAYS_BACK", "7"))
+DAYS_BACK = int(os.getenv("DAYS_BACK", "14"))
 AFTER = os.getenv("AFTER", "").strip()          # אופציונלי: YYYY-MM-DD
 MAX_RESULTS = int(os.getenv("MAX_RESULTS", "2000"))
 
 ASF_URL = "https://api.daac.asf.alaska.edu/services/search/param"
 
-def safe_print_db_parts():
-    if not SUPABASE_DB_URL:
-        print("DB: SUPABASE_DB_URL is EMPTY")
-        return
-    p = urlparse(SUPABASE_DB_URL)
-    print("DB scheme:", p.scheme)
-    print("DB host:", p.hostname)
-    print("DB port:", p.port)
-    print("DB user:", p.username)
-    print("DB name:", (p.path or "").lstrip("/"))
-    print("DB has sslmode:", "sslmode=" in (p.query or ""))
-
-def compute_after_date() -> str:
+def compute_start_date() -> str:
     if AFTER:
         return AFTER
     dt = datetime.now(timezone.utc) - timedelta(days=DAYS_BACK)
@@ -55,8 +42,8 @@ def asf_search(aoi_wkt: str, start_date: str):
     return r.json()
 
 def upsert_scenes(features):
-    # חיבור DB
-  with psycopg.connect(SUPABASE_DB_URL, prepare_threshold=0) as con:
+    # Transaction pooler: disable prepared statements
+    with psycopg.connect(SUPABASE_DB_URL, prepare_threshold=0) as con:
         inserted = 0
         for f in features:
             p = f.get("properties", {}) or {}
@@ -91,15 +78,11 @@ def upsert_scenes(features):
 
 def main():
     if not AOI_WKT:
-        raise RuntimeError("AOI_WKT is empty. Add GitHub Actions secret AOI_WKT (WKT polygon).")
-
+        raise RuntimeError("AOI_WKT is empty. Set GitHub Actions secret AOI_WKT.")
     if not SUPABASE_DB_URL:
-        raise RuntimeError("SUPABASE_DB_URL is empty. Add GitHub Actions secret SUPABASE_DB_URL.")
+        raise RuntimeError("SUPABASE_DB_URL is empty. Set GitHub Actions secret SUPABASE_DB_URL.")
 
-    # דיבאג בטוח ל-DB (בלי סיסמה)
-    safe_print_db_parts()
-
-    start_date = compute_after_date()
+    start_date = compute_start_date()
     data = asf_search(AOI_WKT, start_date)
     features = data.get("features", []) or []
     print("ASF returned features:", len(features))
