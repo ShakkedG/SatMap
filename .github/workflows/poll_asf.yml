@@ -1,21 +1,64 @@
 name: Poll ASF Scenes
 
 on:
-  schedule:
-    - cron: "0 3 * * *"   # כל יום 03:00 UTC
   workflow_dispatch:
+  schedule:
+    - cron: "0 */6 * * *"   # כל 6 שעות
 
 jobs:
   poll:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - run: pip install requests psycopg[binary]
-      - run: python pipeline/poll_asf.py
+
+      - name: Install deps
+        run: pip install requests psycopg[binary]
+
+      # דיבאג בטוח: בודק שה-Secrets באמת הגיעו, ומפרק את ה-DB URL בלי סיסמה
+      - name: Debug secrets + DB URL parts (safe)
+        run: |
+          python - <<'PY'
+          import os
+          from urllib.parse import urlparse
+
+          db = os.getenv("SUPABASE_DB_URL","")
+          aoi = os.getenv("AOI_WKT","")
+
+          print("SUPABASE_DB_URL set:", bool(db))
+          print("AOI_WKT set:", bool(aoi))
+          print("AOI_WKT length:", len(aoi))
+
+          if db:
+            p = urlparse(db)
+            print("DB scheme:", p.scheme)
+            print("DB host:", p.hostname)
+            print("DB port:", p.port)
+            print("DB user:", p.username)
+            print("DB name:", (p.path or "").lstrip("/"))
+            print("DB has sslmode:", "sslmode=" in (p.query or ""))
+
+            # בדיקות שמסבירות את השגיאה שלך "Tenant or user not found"
+            if p.username and not p.username.startswith("postgres."):
+              print("WARN: username does not start with 'postgres.' -> pooler may say Tenant or user not found")
+            if p.hostname and "pooler.supabase.com" not in p.hostname:
+              print("WARN: host is not pooler.supabase.com -> IPv4/direct mismatch likely")
+          PY
         env:
           SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
           AOI_WKT: ${{ secrets.AOI_WKT }}
-          DATE_START: "2025-01-01"
+
+      - name: Run poller
+        run: python pipeline/poll_asf.py
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          AOI_WKT: ${{ secrets.AOI_WKT }}
+          # אם תרצה: תאריך קבוע במקום DAYS_BACK
+          # AFTER: "2026-02-01"
+          DAYS_BACK: "14"
+          MAX_RESULTS: "2000"
