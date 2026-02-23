@@ -1,157 +1,110 @@
-import os, sys, json, hashlib
+#!/usr/bin/env python3
+import os
+import json
+import time
 import requests
-from datetime import datetime, timezone
 
-SUPABASE_URL = os.getenv("SUPABASE_URL", "").strip().rstrip("/")
-SERVICE_ROLE = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "").strip()
-
-HYP3_API_URL = os.getenv("HYP3_API_URL", "https://hyp3-api.asf.alaska.edu").strip().rstrip("/")
+# ========= ENV =========
 EDL_TOKEN = os.getenv("EDL_TOKEN", "").strip()
+HYP3_API_URL = os.getenv("HYP3_API_URL", "https://hyp3-api.asf.alaska.edu").strip()
 
-SUBMIT_LIMIT = int(os.getenv("SUBMIT_LIMIT", "3"))
-LOOKS = os.getenv("HYP3_LOOKS", "10x2").strip()
-INCLUDE_LOS = os.getenv("INCLUDE_LOS", "true").strip().lower() == "true"
+# בקוד שלך כבר יש "Pairs fetched: X" – תשאיר את הפונקציה שמביאה pairs כמו שהיא,
+# ופשוט תשתמש ב-submit_hyp3_jobs(pairs) למטה כדי לשלוח ל-HyP3.
 
-def supabase_headers():
-    return {
-        "apikey": SERVICE_ROLE,
-        "Authorization": f"Bearer {SERVICE_ROLE}",
-        "Content-Type": "application/json",
-        "Prefer": "resolution=merge-duplicates,return=minimal",
-    }
+TIMEOUT = 90
 
-def hyp3_headers():
+
+def _headers():
+    if not EDL_TOKEN:
+        raise RuntimeError("Missing EDL_TOKEN (GitHub Actions secret).")
     return {
         "Authorization": f"Bearer {EDL_TOKEN}",
         "Content-Type": "application/json",
         "Accept": "application/json",
     }
 
-def sb_get(path, params=None):
-    url = f"{SUPABASE_URL}/rest/v1/{path}"
-    r = requests.get(url, headers=supabase_headers(), params=params or {}, timeout=60)
-    r.raise_for_status()
-    return r.json()
 
-def sb_patch(table, where_qs, payload):
-    url = f"{SUPABASE_URL}/rest/v1/{table}{where_qs}"
-    r = requests.patch(url, headers=supabase_headers(), json=payload, timeout=60)
-    if r.status_code not in (200, 204):
-        print("Supabase PATCH status:", r.status_code, "body:", r.text[:800])
-        r.raise_for_status()
+def _pick_root(base: str) -> str:
+    """
+    HyP3 מפרסם שרתים גם ב- / וגם ב- /api (תלוי בפריסה).
+    נבדוק GET /user כדי לבחור root תקין (200/401/403 אומר שהנתיב קיים).
+    """
+    base = base.rstrip("/")
+    candidates = [base, f"{base}/api"]
 
-def sb_upsert(table, rows, on_conflict):
-    url = f"{SUPABASE_URL}/rest/v1/{table}?on_conflict={on_conflict}"
-    r = requests.post(url, headers=supabase_headers(), json=rows, timeout=120)
-    if r.status_code not in (200, 201, 204):
-        print("Supabase UPSERT status:", r.status_code, "body:", r.text[:800])
-        r.raise_for_status()
-
-def hyp3_post_jobs(payload):
-    # HyP3 שרתים לפעמים חשופים גם ב-/api וגם ב-/
-    candidates = [f"{HYP3_API_URL}/jobs", f"{HYP3_API_URL}/api/jobs"]
-    last = None
-    for u in candidates:
+    h = _headers()
+    for root in candidates:
+        url = f"{root}/user"
         try:
-            r = requests.post(u, headers=hyp3_headers(), json=payload, timeout=120)
-            if r.status_code in (404,):
-                last = (r.status_code, r.text)
-                continue
-            r.raise_for_status()
-            return r.json()
+            r = requests.get(url, headers=h, timeout=30)
+            print(f"[HyP3] probe {url} -> {r.status_code}")
+            if r.status_code != 404:
+                # 200 = מאומת, 401/403 = נתיב קיים אבל טוקן לא תקין/לא הוזן
+                return root
         except Exception as e:
-            last = str(e)
-    raise RuntimeError(f"HyP3 POST failed. Last error: {last}")
+            print(f"[HyP3] probe failed for {url}: {e}")
 
-def short_name(pair_key: str) -> str:
-    h = hashlib.sha1(pair_key.encode("utf-8")).hexdigest()[:10]
-    return f"satmap-insar-{h}"
+    # אם איכשהו הכל נכשל – נחזיר base וננסה בכל זאת
+    return base
 
-def main():
-    if not SUPABASE_URL or not SERVICE_ROLE:
-        raise RuntimeError("Missing SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY")
-    if not EDL_TOKEN:
-        raise RuntimeError("Missing EDL_TOKEN (Earthdata bearer token)")
 
-    # 1) קח N זוגות new
-    pairs = sb_get(
-        "pairs",
-        params={
-            "select": "pair_key,ref_granule_id,sec_granule_id,status,created_at",
-            "status": "eq.new",
-            "order": "created_at.asc",
-            "limit": str(SUBMIT_LIMIT),
-        },
-    )
-    print("Pairs fetched:", len(pairs))
-    if not pairs:
-        print("No pairs with status=new")
-        return
+def submit_hyp3_jobs(jobs_payload: dict) -> dict:
+    """
+    jobs_payload חייב להיות בפורמט:
+    { "jobs": [ { "name": "...", "job_type": "INSAR_GAMMA", "job_parameters": { "granules": [...] } } ] }
+    """
+    root = _pick_root(HYP3_API_URL)
+    submit_url = f"{root}/jobs"
 
-    # 2) בנה jobs list (INSAR_GAMMA עם ESA granule IDs) :contentReference[oaicite:2]{index=2}
-    jobs = []
-    for p in pairs:
-        pair_key = p["pair_key"]
-        ref_g = p["ref_granule_id"]
-        sec_g = p["sec_granule_id"]
+    print(f"[HyP3] base env     : {HYP3_API_URL}")
+    print(f"[HyP3] root picked : {root}")
+    print(f"[HyP3] POST url     : {submit_url}")
+    print(f"[HyP3] jobs count   : {len(jobs_payload.get('jobs', []))}")
 
-        job_def = {
-            "name": short_name(pair_key),
-            "job_type": "INSAR_GAMMA",
-            "job_parameters": {
-                "granules": [ref_g, sec_g],
-                "looks": LOOKS,
-                "include_los_displacement": INCLUDE_LOS,
-            },
-        }
-        jobs.append(job_def)
+    h = _headers()
+    r = requests.post(submit_url, headers=h, json=jobs_payload, timeout=TIMEOUT)
 
-    payload = {"jobs": jobs}
-    print("Submitting HyP3 jobs:", len(jobs), "api:", HYP3_API_URL)
+    print(f"[HyP3] status: {r.status_code}")
+    if r.status_code >= 400:
+        # דיבאג: הדפס 800 תווים ראשונים כדי להבין מה השרת מחזיר
+        print("[HyP3] response (first 800 chars):")
+        print(r.text[:800])
+        r.raise_for_status()
 
-    # 3) שליחה ל-HyP3
-    resp = hyp3_post_jobs(payload)
-    hyp3_jobs = resp.get("jobs", []) if isinstance(resp, dict) else []
-    print("HyP3 returned jobs:", len(hyp3_jobs))
+    # HyP3 מחזיר JSON עם jobs
+    try:
+        return r.json()
+    except Exception:
+        print("[HyP3] ERROR: response is not JSON. First 800 chars:")
+        print(r.text[:800])
+        raise
 
-    # 4) שמירה ב-Supabase + עדכון סטטוס בזוגות
-    now = datetime.now(timezone.utc).isoformat()
-    rows = []
-    for idx, p in enumerate(pairs):
-        pair_key = p["pair_key"]
-        j = hyp3_jobs[idx] if idx < len(hyp3_jobs) else {}
-        job_id = j.get("job_id") or j.get("id")
-        status_code = j.get("status_code") or "RUNNING"
 
-        # map לסטטוסים שלנו
-        status_norm = "running"
-        if str(status_code).upper() == "SUCCEEDED":
-            status_norm = "succeeded"
-        elif str(status_code).upper() in ("FAILED", "CANCELED"):
-            status_norm = "failed"
+# ========= דוגמה לשימוש =========
+# השארתי פה דוגמה כדי שתוכל להשוות לפורמט התקין של HyP3:
+# (זה בדיוק מה שהדוקס מציג) :contentReference[oaicite:1]{index=1}
+def example_payload(ref_granule: str, sec_granule: str) -> dict:
+    return {
+        "jobs": [
+            {
+                "name": "satmap-insar-example",
+                "job_type": "INSAR_GAMMA",
+                "job_parameters": {
+                    "granules": [ref_granule, sec_granule],
+                },
+            }
+        ]
+    }
 
-        if not job_id:
-            raise RuntimeError(f"Missing job_id in HyP3 response for pair {pair_key}")
-
-        rows.append({
-            "job_id": job_id,
-            "pair_key": pair_key,
-            "product_type": "INSAR_GAMMA",
-            "status": status_norm,
-            "submitted_at": now,
-            "updated_at": now,
-            "result_meta": j,
-        })
-
-        # update pairs.status
-        sb_patch("pairs", f"?pair_key=eq.{pair_key}", {"status": "submitted"})
-
-    sb_upsert("hyp3_jobs", rows, on_conflict="job_id")
-    print("Saved hyp3_jobs:", len(rows), "and marked pairs=submitted")
 
 if __name__ == "__main__":
-    try:
-        main()
-    except Exception as e:
-        print("ERROR:", type(e).__name__, str(e))
-        sys.exit(1)
+    # כאן אצלך כבר יש לוגיקה שמביאה pairs ומרכיבה payload.
+    # תוודא שבסוף אתה קורא:
+    # resp = submit_hyp3_jobs(payload)
+    # ותדפיס את resp בקצרה.
+
+    # אם אתה מריץ ידנית ורוצה בדיקה מהירה:
+    # payload = example_payload("S1A_...REF...", "S1A_...SEC...")
+    # resp = submit_hyp3_jobs(payload)
+    # print(json.dumps(resp, indent=2)[:2000])
+    print("OK: submit_hyp3.py loaded. Hook submit_hyp3_jobs(payload) into your pipeline.")
