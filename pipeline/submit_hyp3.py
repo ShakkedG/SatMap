@@ -122,7 +122,39 @@ def normalize_status(status_code: str) -> str:
         return "failed"
     return "running"
 
+def hyp3_get_user() -> dict:
+    root = hyp3_pick_root(HYP3_API_URL)
+    url = f"{root}/user"
+    r = requests.get(url, headers=hyp3_headers(), timeout=60)
+    if r.status_code >= 400:
+        print("[HyP3] /user failed:", r.status_code, r.text[:800])
+        r.raise_for_status()
+    return r.json()
 
+def hyp3_get_costs() -> dict:
+    root = hyp3_pick_root(HYP3_API_URL)
+    url = f"{root}/costs"
+    r = requests.get(url, headers=hyp3_headers(), timeout=60)
+    if r.status_code >= 400:
+        print("[HyP3] /costs failed:", r.status_code, r.text[:800])
+        r.raise_for_status()
+    return r.json()
+
+def extract_job_cost(costs_resp: dict, job_type: str) -> float | int | None:
+    # תומך בכמה פורמטים אפשריים
+    if costs_resp is None:
+        return None
+    if job_type in costs_resp and isinstance(costs_resp[job_type], (int, float)):
+        return costs_resp[job_type]
+    if "costs" in costs_resp:
+        c = costs_resp["costs"]
+        if isinstance(c, dict) and job_type in c and isinstance(c[job_type], (int, float)):
+            return c[job_type]
+    if "jobs" in costs_resp and isinstance(costs_resp["jobs"], list):
+        for row in costs_resp["jobs"]:
+            if (row.get("job_type") == job_type) and isinstance(row.get("credit_cost"), (int, float)):
+                return row["credit_cost"]
+    return None
 def main():
     if not SUPABASE_URL or not SERVICE_ROLE:
         raise RuntimeError("Missing SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY")
