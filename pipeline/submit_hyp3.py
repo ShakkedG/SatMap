@@ -158,7 +158,27 @@ def extract_job_cost(costs_resp: dict, job_type: str) -> float | int | None:
 def main():
     if not SUPABASE_URL or not SERVICE_ROLE:
         raise RuntimeError("Missing SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY")
+user = hyp3_get_user()
+remaining = user.get("remaining_credits", None)
 
+costs = hyp3_get_costs()
+job_cost = extract_job_cost(costs, "INSAR_GAMMA")
+
+print("[HyP3] remaining_credits:", remaining, "job_cost:", job_cost)
+
+if isinstance(remaining, (int, float)) and remaining <= 0:
+    print("No credits — skipping submit.")
+    return
+
+if isinstance(remaining, (int, float)) and isinstance(job_cost, (int, float)) and job_cost > 0:
+    max_jobs = int(remaining // job_cost)
+    if max_jobs <= 0:
+        print("Not enough credits for even 1 job — skipping submit.")
+        return
+    # תקטין בפועל כמה תשלח
+    global SUBMIT_LIMIT
+    SUBMIT_LIMIT = min(SUBMIT_LIMIT, max_jobs)
+    print("Adjusted SUBMIT_LIMIT =", SUBMIT_LIMIT)
     pairs = sb_get(
         "pairs",
         params={
