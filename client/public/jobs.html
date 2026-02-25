@@ -5,48 +5,119 @@
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <title>SatMap – HyP3 Jobs</title>
     <style>
-      body { font-family: Arial, sans-serif; margin: 16px; }
-      .row { display:flex; gap:12px; padding:10px; border-bottom:1px solid #eee; align-items:center; }
-      .tag { padding:2px 8px; border-radius:999px; font-size:12px; border:1px solid #ddd; }
-      .running { }
-      .succeeded { font-weight:700; }
-      .failed { font-weight:700; }
-      .muted { color:#666; }
-      .top { margin-bottom:12px; }
+      body { font-family: Arial, sans-serif; margin: 16px; background:#fafafa; }
+      .top { display:flex; flex-wrap:wrap; gap:12px; align-items:baseline; }
+      .pill { border:1px solid #ddd; padding:4px 10px; border-radius:999px; background:#fff; }
+      .row { background:#fff; border:1px solid #eee; border-radius:10px; padding:12px; margin:10px 0; }
+      .meta { color:#666; font-size:13px; }
+      .status { font-weight:700; }
+      .links a { margin-left:10px; }
+      .files { margin-top:8px; font-size:13px; }
+      .files details { margin-top:6px; }
+      .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size:12px; }
+      button { padding:6px 10px; }
+      input { padding:6px 10px; width: 320px; max-width: 100%; }
     </style>
   </head>
   <body>
     <div class="top">
-      <h2>HyP3 Jobs</h2>
-      <div id="meta" class="muted"></div>
-      <div id="counts" class="muted"></div>
+      <h2 style="margin:0">HyP3 Jobs</h2>
+      <span id="updated" class="pill"></span>
+      <span id="counts" class="pill"></span>
     </div>
+
+    <div style="margin:12px 0; display:flex; gap:10px; flex-wrap:wrap;">
+      <input id="q" placeholder="סינון לפי pair_key / job_id / status..." />
+      <button id="refresh">רענן</button>
+    </div>
+
     <div id="list"></div>
 
     <script>
-      async function main() {
-        const r = await fetch("./hyp3_jobs.json", { cache: "no-store" });
-        const data = await r.json();
-        document.getElementById("meta").textContent = "עודכן: " + data.generated_at;
-        document.getElementById("counts").textContent = "סיכום: " + JSON.stringify(data.counts);
+      function el(tag, cls) { const e=document.createElement(tag); if(cls) e.className=cls; return e; }
 
+      function jobMatches(j, q){
+        if(!q) return true;
+        q = q.toLowerCase();
+        return (
+          (j.job_id||"").toLowerCase().includes(q) ||
+          (j.pair_key||"").toLowerCase().includes(q) ||
+          (j.status||"").toLowerCase().includes(q) ||
+          (j.product_type||"").toLowerCase().includes(q)
+        );
+      }
+
+      function render(data, q){
+        document.getElementById("updated").textContent = "עודכן: " + (data.generated_at || "");
+        document.getElementById("counts").textContent = "סיכום: " + JSON.stringify(data.counts || {});
         const list = document.getElementById("list");
         list.innerHTML = "";
-        for (const j of data.jobs) {
-          const s = (j.status || "unknown").toLowerCase();
-          const div = document.createElement("div");
-          div.className = "row";
-          div.innerHTML = `
-            <span class="tag ${s}">${s}</span>
-            <span><b>${j.product_type || ""}</b></span>
-            <span class="muted">${j.pair_key || ""}</span>
-            <span class="muted">${j.submitted_at || ""}</span>
-          `;
-          list.appendChild(div);
+
+        const jobs = (data.jobs || []).filter(j => jobMatches(j, q));
+
+        for(const j of jobs){
+          const row = el("div","row");
+
+          const title = el("div");
+          title.innerHTML = `<span class="status">${j.status}</span> • <b>${j.product_type||""}</b>`;
+          row.appendChild(title);
+
+          const meta = el("div","meta mono");
+          meta.textContent = `job_id: ${j.job_id || ""}\npair_key: ${j.pair_key || ""}\nsubmitted: ${j.submitted_at || ""}\nupdated: ${j.updated_at || ""}`;
+          row.appendChild(meta);
+
+          const links = el("div","links");
+          if(j.download_zip){
+            const a = el("a"); a.href=j.download_zip; a.textContent="Download ZIP"; a.target="_blank"; links.appendChild(a);
+          }
+          if(j.browse){
+            const a = el("a"); a.href=j.browse; a.textContent="Browse"; a.target="_blank"; links.appendChild(a);
+          }
+          row.appendChild(links);
+
+          if(Array.isArray(j.files) && j.files.length){
+            const details = el("details","files");
+            const sum = el("summary"); sum.textContent = `Files (${j.files.length})`;
+            details.appendChild(sum);
+
+            const ul = el("ul");
+            for(const f of j.files){
+              const li = el("li");
+              const a = el("a"); a.href=f.url; a.textContent = f.name || f.url; a.target="_blank";
+              li.appendChild(a);
+              ul.appendChild(li);
+            }
+            details.appendChild(ul);
+            row.appendChild(details);
+          }
+
+          list.appendChild(row);
+        }
+
+        if(!jobs.length){
+          const empty = el("div","meta");
+          empty.textContent = "אין תוצאות (או שה-JSON עוד לא נוצר).";
+          list.appendChild(empty);
         }
       }
+
+      async function load(){
+        const r = await fetch("./hyp3_jobs.json", { cache: "no-store" });
+        if(!r.ok) throw new Error("Failed to load hyp3_jobs.json: " + r.status);
+        return await r.json();
+      }
+
+      async function main(){
+        const qEl = document.getElementById("q");
+        const data = await load();
+        render(data, qEl.value);
+
+        qEl.addEventListener("input", () => render(data, qEl.value));
+        document.getElementById("refresh").addEventListener("click", () => location.reload());
+      }
+
       main().catch(err => {
-        document.getElementById("list").textContent = "שגיאה בטעינה: " + err;
+        document.getElementById("list").textContent = "שגיאה: " + err;
       });
     </script>
   </body>
