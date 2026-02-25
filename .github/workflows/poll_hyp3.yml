@@ -1,19 +1,30 @@
-name: Poll HyP3 status
+name: Poll HyP3 Jobs
 
 on:
   workflow_dispatch:
   schedule:
-    - cron: "*/30 * * * *"  # כל 30 דקות
+    - cron: "*/30 * * * *" # כל 30 דקות
+
+permissions:
+  contents: write
+
+concurrency:
+  group: hyp3-poll
+  cancel-in-progress: false
 
 jobs:
   poll:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - run: pip install requests
+
+      - name: Install deps
+        run: pip install requests
+
       - name: Poll HyP3 jobs
         run: python pipeline/poll_hyp3.py
         env:
@@ -22,3 +33,23 @@ jobs:
           EDL_TOKEN: ${{ secrets.EDL_TOKEN }}
           HYP3_API_URL: "https://hyp3-api.asf.alaska.edu"
           POLL_LIMIT: "20"
+
+      # ---------- OPTIONAL: export public JSON for GitHub Pages ----------
+      - name: Export public jobs JSON
+        run: python pipeline/export_public_jobs.py
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          OUT_PATH: client/public/hyp3_jobs.json
+
+      - name: Commit JSON if changed
+        run: |
+          if [[ -n "$(git status --porcelain client/public/hyp3_jobs.json)" ]]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add client/public/hyp3_jobs.json
+            git commit -m "Update hyp3_jobs public feed"
+            git push
+          else
+            echo "No changes"
+          fi
