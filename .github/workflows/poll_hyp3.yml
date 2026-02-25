@@ -3,7 +3,7 @@ name: Poll HyP3 Jobs
 on:
   workflow_dispatch:
   schedule:
-    - cron: "*/30 * * * *" # כל 30 דקות
+    - cron: "*/30 * * * *"
 
 permissions:
   contents: write
@@ -34,7 +34,6 @@ jobs:
           HYP3_API_URL: "https://hyp3-api.asf.alaska.edu"
           POLL_LIMIT: "20"
 
-      # ---------- OPTIONAL: export public JSON for GitHub Pages ----------
       - name: Export public jobs JSON
         run: python pipeline/export_public_jobs.py
         env:
