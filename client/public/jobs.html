@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>SatMap – HyP3 Jobs</title>
+    <style>
+      body { font-family: Arial, sans-serif; margin: 16px; }
+      .row { display:flex; gap:12px; padding:10px; border-bottom:1px solid #eee; align-items:center; }
+      .tag { padding:2px 8px; border-radius:999px; font-size:12px; border:1px solid #ddd; }
+      .running { }
+      .succeeded { font-weight:700; }
+      .failed { font-weight:700; }
+      .muted { color:#666; }
+      .top { margin-bottom:12px; }
+    </style>
+  </head>
+  <body>
+    <div class="top">
+      <h2>HyP3 Jobs</h2>
+      <div id="meta" class="muted"></div>
+      <div id="counts" class="muted"></div>
+    </div>
+    <div id="list"></div>
+
+    <script>
+      async function main() {
+        const r = await fetch("./hyp3_jobs.json", { cache: "no-store" });
+        const data = await r.json();
+        document.getElementById("meta").textContent = "עודכן: " + data.generated_at;
+        document.getElementById("counts").textContent = "סיכום: " + JSON.stringify(data.counts);
+
+        const list = document.getElementById("list");
+        list.innerHTML = "";
+        for (const j of data.jobs) {
+          const s = (j.status || "unknown").toLowerCase();
+          const div = document.createElement("div");
+          div.className = "row";
+          div.innerHTML = `
+            <span class="tag ${s}">${s}</span>
+            <span><b>${j.product_type || ""}</b></span>
+            <span class="muted">${j.pair_key || ""}</span>
+            <span class="muted">${j.submitted_at || ""}</span>
+          `;
+          list.appendChild(div);
+        }
+      }
+      main().catch(err => {
+        document.getElementById("list").textContent = "שגיאה בטעינה: " + err;
+      });
+    </script>
+  </body>
+</html>
