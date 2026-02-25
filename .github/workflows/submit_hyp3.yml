@@ -26,4 +26,5 @@ jobs:
           SUBMIT_LIMIT: ${{ inputs.submit_limit }}
           HYP3_API_URL: "https://hyp3-api.asf.alaska.edu"
           HYP3_LOOKS: "10x2"
-          INCLUDE_LOS: "true"
+          INCLUDE_LOOK_VECTORS: "true"
+          INCLUDE_LOS_DISPLACEMENT: "true"
