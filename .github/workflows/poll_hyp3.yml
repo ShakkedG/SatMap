@@ -3,7 +3,7 @@ name: Poll HyP3 Jobs
 on:
   workflow_dispatch:
   schedule:
-    - cron: "*/30 * * * *"
+    - cron: "*/30 * * * *" # כל 30 דקות
 
 permissions:
   contents: write
@@ -19,7 +19,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # חשוב: בלי זה rebase לא יציב
+          fetch-depth: 0 # חשוב ל-rebase
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -57,33 +57,37 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          # נסיון עד 5 פעמים כדי להתמודד עם קומיטים שנכנסים במקביל
+          # שומרים את השינויים המקומיים כדי לאפשר rebase
+          git stash push -u -m "hyp3-json" -- client/public/hyp3_jobs.json
+
           for i in 1 2 3 4 5; do
             echo "Attempt $i/5"
 
-            # תמיד להתבסס על ה-main העדכני
             git fetch origin main
-            git rebase origin/main || (git rebase --abort && exit 1)
+            git rebase origin/main
 
-            # ליצור/לעדכן קומיט רק אחרי שאנחנו על HEAD עדכני
-            git add client/public/hyp3_jobs.json
-            if git diff --cached --quiet; then
-              echo "Nothing staged"
+            # מחזירים את השינויים
+            git stash pop || true
+
+            if [[ -z "$(git status --porcelain client/public/hyp3_jobs.json)" ]]; then
+              echo "No changes after rebase"
               exit 0
             fi
 
+            git add client/public/hyp3_jobs.json
             git commit -m "Update hyp3_jobs public feed" || true
 
-            # שוב fetch+rebase לפני push (למקרה שמישהו דחף בין לבין)
             git fetch origin main
-            git rebase origin/main || (git rebase --abort && exit 1)
+            git rebase origin/main
 
             if git push origin HEAD:main; then
               echo "Push succeeded"
               exit 0
             fi
 
-            echo "Push failed (fetch-first). Retrying..."
+            echo "Push failed, re-stashing and retrying..."
+            git reset --hard
+            git stash push -u -m "hyp3-json" -- client/public/hyp3_jobs.json
             sleep 2
           done
 
