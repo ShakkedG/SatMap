@@ -38,22 +38,34 @@ def main():
     payload = load_payload()
     headers = build_headers()
 
-    r = requests.post(URL, json=payload, headers=headers, timeout=60)
+    def do_try(tag, p):
+        r = requests.post(URL, json=p, headers=headers, timeout=60)
+        print("\n==", tag, "==")
+        print("status:", r.status_code)
+        txt = r.text[:500]
+        print("body(first500):", txt)
+        if r.ok:
+            try:
+                j = r.json()
+                data = j.get("data", None)
+                print("data_len:", len(data) if isinstance(data, list) else type(data))
+            except Exception as e:
+                print("json parse error:", e)
 
-    print("status:", r.status_code)
-    print("content-type:", r.headers.get("content-type", ""))
-    print("body (first 2000 chars):")
-    print(r.text[:2000])
+    # try original
+    do_try("original", payload)
 
-    r.raise_for_status()
+    # try bigger tolerances
+    for t in (30, 80, 120, 200):
+        p2 = dict(payload)
+        p2["tolerance"] = t
+        do_try(f"tolerance={t}", p2)
 
-    # אם התשובה JSON — נדפיס מבנה גדול יותר (עד 20k תווים)
-    try:
-        data = r.json()
-        print("\njson (first 20000 chars pretty):")
-        print(json.dumps(data, ensure_ascii=False, indent=2)[:20000])
-    except Exception:
-        print("\nResponse is not JSON (or failed to parse JSON).")
+    # try swapped point
+    if isinstance(payload.get("point"), list) and len(payload["point"]) == 2:
+        p3 = dict(payload)
+        p3["point"] = [payload["point"][1], payload["point"][0]]
+        do_try("swapped_xy", p3)
 
 if __name__ == "__main__":
     main()
