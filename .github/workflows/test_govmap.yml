@@ -1,4 +1,5 @@
 name: Test GovMap entitiesByPoint
+
 on:
   workflow_dispatch:
 
@@ -7,13 +8,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - run: pip install requests
-      - run: python pipeline/test_govmap_entitiesByPoint.py
-      - run: python pipeline/test_govmap_entitiesByPoint.py
-      
-  env:
-      GOVMAP_TOKEN: ${{ secrets.GOVMAP_TOKEN }}
-    GOVMAP_COOKIE: ${{ secrets.GOVMAP_COOKIE }}
+
+      - name: Install deps
+        run: pip install requests
+
+      - name: Run GovMap test
+        run: python pipeline/test_govmap_entitiesByPoint.py
+        env:
+          GOVMAP_COOKIE: ${{ secrets.GOVMAP_COOKIE }}
+          GOVMAP_TOKEN: ${{ secrets.GOVMAP_TOKEN }}
