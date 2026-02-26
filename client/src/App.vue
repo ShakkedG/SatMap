@@ -1,1278 +1,1075 @@
-<!DOCTYPE html>
-<html lang="he" dir="rtl">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>SatMap – בניינים שוקעים (חריגים) | GovMap</title>
-
-    <style>
-      * { box-sizing: border-box; }
-
-      html, body {
-        margin: 0;
-        padding: 0;
-        height: 100%;
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
-        overflow: hidden;
-        background: #f5f5f5;
-        font-size: 15px;
-      }
-
-      #map { width: 100%; height: 100%; position: relative; }
-
-      /* hide ESRI widgets if appear */
-      .esri-layer-list, .esri-legend { display: none !important; }
-
-      /* ===== Always-open top search bar (copied style) ===== */
-      #top-searchbar {
-        position: fixed;
-        top: 12px;
-        left: 50%;
-        transform: translateX(-50%);
-        width: min(760px, calc(100vw - 24px));
-        z-index: 30000;
-
-        background: #fff;
-        border-radius: 999px;
-        padding: 8px;
-        box-shadow: 0 10px 24px rgba(0, 0, 0, 0.16);
-        border: 2px solid rgba(11, 99, 206, 0.35);
-        display: flex;
-        align-items: center;
-        gap: 10px;
-      }
-      #addrInput {
-        flex: 1;
-        border: 2px solid #111;
-        border-radius: 999px;
-        padding: 10px 12px;
-        font-weight: 900;
-        font-size: 14px;
-        outline: none;
-        text-align: right;
-        direction: rtl;
-      }
-      #addrBtn {
-        padding: 10px 14px;
-        background: #0b63ce;
-        color: #fff;
-        border: none;
-        border-radius: 999px;
-        cursor: pointer;
-        font-weight: 1000;
-        font-size: 14px;
-        white-space: nowrap;
-      }
-      #addrBtn:active { transform: translateY(1px); }
-
-      #addrResults {
-        position: absolute;
-        top: calc(100% + 10px);
-        right: 0;
-        left: 0;
-        display: none;
-        border: 1px solid #e0e0e0;
-        background: #fff;
-        border-radius: 16px;
-        overflow: hidden;
-        max-height: 320px;
-        overflow-y: auto;
-        box-shadow: 0 10px 22px rgba(0, 0, 0, 0.1);
-      }
-      .addr-item {
-        padding: 10px 12px;
-        cursor: pointer;
-        font-size: 14px;
-        border-bottom: 1px solid #f0f0f0;
-        font-weight: 900;
-      }
-      .addr-item:last-child { border-bottom: none; }
-      .addr-item:hover { background: #f5f9ff; }
-      .addr-sub { font-size: 12.5px; color: #666; margin-top: 3px; font-weight: 800; }
-
-      @media (max-width: 768px) {
-        #top-searchbar {
-          top: 10px;
-          left: 50%;
-          transform: translateX(-50%);
-          width: calc(100vw - 20px);
-        }
-      }
-
-      /* PANEL */
-      #info-panel {
-        position: absolute;
-        top: 15px;
-        right: 30px;
-        z-index: 9999;
-        background: white;
-        padding: 0;
-        border-radius: 14px;
-        width: 440px;
-        max-height: calc(100vh - 30px);
-        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.15);
-        font-size: 14px;
-        overflow: hidden;
-        display: flex;
-        flex-direction: column;
-        transition: height 0.2s ease, max-height 0.2s ease;
-      }
-
-      #panel-header {
-        background: linear-gradient(135deg, #0b63ce 0%, #084eac 100%);
-        color: white;
-        padding: 14px 16px;
-        border-bottom: 1px solid rgba(255, 255, 255, 0.15);
-        flex-shrink: 0;
-      }
-      #panel-header h1 { margin: 0; font-size: 17px; font-weight: 1000; letter-spacing: -0.3px; }
-      #panel-header p { margin: 6px 0 0 0; font-size: 13px; opacity: 0.94; line-height: 1.35; font-weight: 900; }
-
-      #header-actions {
-        margin-top: 10px;
-        display: flex;
-        gap: 8px;
-        align-items: center;
-        flex-wrap: wrap;
-      }
-      .hbtn {
-        padding: 9px 12px;
-        border-radius: 12px;
-        border: 1px solid rgba(255, 255, 255, 0.35);
-        background: rgba(255, 255, 255, 0.16);
-        color: #fff;
-        font-weight: 1000;
-        cursor: pointer;
-        display: inline-flex;
-        gap: 8px;
-        align-items: center;
-        user-select: none;
-        font-size: 13px;
-      }
-      .hbtn:active { transform: translateY(1px); }
-      .hbtn.secondary { background: rgba(0, 0, 0, 0.12); border-color: rgba(255, 255, 255, 0.22); }
-
-      #tabs {
-        display: flex;
-        background: #fafafa;
-        border-bottom: 2px solid #e6e6e6;
-        flex-shrink: 0;
-        overflow-x: auto;
-      }
-      .tab {
-        flex: 1;
-        padding: 11px 10px;
-        text-align: center;
-        cursor: pointer;
-        border-bottom: 3px solid transparent;
-        transition: all 0.2s ease;
-        font-size: 13px;
-        font-weight: 1000;
-        color: #666;
-        user-select: none;
-        white-space: nowrap;
-        min-width: 96px;
-      }
-      .tab:hover { background: #f2f6ff; color: #2a4c8a; }
-      .tab.active { background: white; border-bottom-color: #0b63ce; color: #0b63ce; }
-
-      #controls {
-        padding: 12px 14px;
-        background: #fafafa;
-        border-bottom: 1px solid #e8e8e8;
-        flex-shrink: 0;
-      }
-
-      .controls-grid {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 10px;
-        align-items: end;
-      }
-      .ctl label {
-        font-weight: 1000;
-        font-size: 13px;
-        color: #333;
-        display: block;
-        margin-bottom: 6px;
-      }
-      .ctl input {
-        width: 100%;
-        padding: 10px 12px;
-        border-radius: 12px;
-        border: 1px solid #cfcfcf;
-        font-size: 14px;
-        background: white;
-        font-weight: 1000;
-        outline: none;
-      }
-
-      .btn-wide {
-        grid-column: 1 / -1;
-        padding: 12px;
-        border-radius: 14px;
-        border: none;
-        font-size: 14px;
-        font-weight: 1000;
-        cursor: pointer;
-        box-shadow: 0 10px 24px rgba(11, 99, 206, 0.18);
-        background: #0b63ce;
-        color: #fff;
-      }
-      .btn-wide:active { transform: translateY(1px); }
-      .btn-wide.danger {
-        background: #c62828;
-        box-shadow: 0 10px 24px rgba(198, 40, 40, 0.18);
-      }
-      .btn-wide.gray {
-        background: #455a64;
-        box-shadow: 0 10px 24px rgba(69, 90, 100, 0.18);
-      }
-
-      #info-content {
-        padding: 14px;
-        overflow-y: auto;
-        flex: 1;
-        min-height: 0;
-        background: white;
-      }
-
-      .tab-content { display: none; }
-      .tab-content.active { display: block; }
-
-      .message {
-        padding: 12px 14px;
-        border-radius: 12px;
-        margin-bottom: 10px;
-        font-size: 13.5px;
-        border-right: 4px solid;
-        line-height: 1.55;
-        font-weight: 900;
-      }
-      .message-info { background: #e7f3ff; color: #063a73; border-right-color: #0b63ce; }
-      .message-warn { background: #fff7e6; color: #6a3f00; border-right-color: #ffb300; }
-      .message-error { background: #fff0f0; color: #b20000; border-right-color: #ff0000; }
-
-      .kpi-row {
-        display: grid;
-        grid-template-columns: repeat(3, 1fr);
-        gap: 8px;
-        margin-bottom: 10px;
-      }
-      .kpi {
-        border: 1px solid #eee;
-        background: #fafafa;
-        border-radius: 14px;
-        padding: 10px;
-        text-align: center;
-      }
-      .kpi .v {
-        font-weight: 1000;
-        font-size: 16px;
-        margin-bottom: 4px;
-      }
-      .kpi .l {
-        font-weight: 1000;
-        color: #666;
-        font-size: 11px;
-        letter-spacing: 0.2px;
-      }
-      .v.ok { color: #0b63ce; }
-      .v.bad { color: #c62828; }
-      .v.na { color: #666; }
-
-      .outlier-list {
-        border: 1px solid #eee;
-        border-radius: 16px;
-        overflow: hidden;
-        background: #fff;
-        box-shadow: 0 10px 22px rgba(0, 0, 0, 0.05);
-      }
-      .outlier-row {
-        display: grid;
-        grid-template-columns: 56px 1fr auto;
-        gap: 10px;
-        align-items: center;
-        padding: 11px 12px;
-        border-bottom: 1px solid #f0f0f0;
-        cursor: pointer;
-        background: #fff;
-      }
-      .outlier-row:nth-child(even) { background: #fafafa; }
-      .outlier-row:hover { background: #fff3f3; }
-      .pill {
-        width: 44px; height: 34px;
-        border-radius: 12px;
-        display: flex; align-items: center; justify-content: center;
-        font-weight: 1000;
-        border: 1px solid #ffd0d0;
-        background: #fff0f0;
-        color: #b20000;
-        direction: ltr;
-      }
-      .outlier-id { font-weight: 1000; color: #111; direction: ltr; text-align: left; }
-      .outlier-rate { font-weight: 1000; color: #c62828; direction: ltr; text-align: left; min-width: 110px; }
-      .outlier-rate small { display:block; font-weight: 900; color:#666; font-size:11px; margin-top:2px; }
-
-      /* Loading */
-      #loading {
-        position: absolute;
-        top: 50%;
-        left: 50%;
-        transform: translate(-50%, -50%);
-        background: white;
-        padding: 24px 28px;
-        border-radius: 16px;
-        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.22);
-        z-index: 10000;
-        text-align: center;
-      }
-      .spinner {
-        width: 40px;
-        height: 40px;
-        margin: 0 auto 14px;
-        border: 4px solid #e7e7e7;
-        border-top: 4px solid #0b63ce;
-        border-radius: 50%;
-        animation: spin 0.8s linear infinite;
-      }
-      @keyframes spin {
-        0% { transform: rotate(0deg); }
-        100% { transform: rotate(360deg); }
-      }
-
-      /* Collapse behavior */
-      #info-panel.collapsed { max-height: 74px; height: 74px; }
-      #info-panel.collapsed #tabs,
-      #info-panel.collapsed #controls,
-      #info-panel.collapsed #info-content { display: none; }
-      #info-panel.collapsed #panel-header { padding: 10px 12px; }
-      #info-panel.collapsed #panel-header p { display: none; }
-      #info-panel.collapsed #panel-header h1 { font-size: 15px; }
-      #info-panel.collapsed #header-actions { margin-top: 0; justify-content: flex-end; }
-      #info-panel.collapsed #panelToggleBtn { display: inline-flex; }
-
-      /* Mobile bottom sheet */
-      @media (max-width: 768px) {
-        #info-panel {
-          position: fixed;
-          left: 0; right: 0;
-          top: auto; bottom: 0;
-          width: 100%;
-          height: calc(var(--vh, 1vh) * 55);
-          max-height: calc(var(--vh, 1vh) * 55);
-          border-radius: 20px 20px 0 0;
-          overscroll-behavior: contain;
-          touch-action: pan-y;
-        }
-        #panel-header { padding: 10px 12px; }
-        #panel-header h1 { font-size: 15px; }
-        #panel-header p { margin-top: 4px; font-size: 12px; line-height: 1.25; }
-        #header-actions { margin-top: 8px; }
-        #header-actions .hbtn { padding: 8px 10px; font-size: 12px; border-radius: 12px; }
-        #tabs .tab { padding: 9px 8px; font-size: 12px; min-width: 78px; }
-        #controls { padding: 8px 10px; }
-        #info-content {
-          padding: 10px 10px 16px 10px;
-          overflow-y: auto;
-          -webkit-overflow-scrolling: touch;
-          overscroll-behavior: contain;
-          touch-action: pan-y;
-        }
-      }
-    </style>
-
-    <script>
-      // ===================== CONFIG =====================
-      const TOKEN = "ede9a5fd-7c23-432f-8ffb-d85feffa3f3c";
-      const BUILDINGS_LAYER = "225287";
-
-      // עדכן לשם הקובץ אצלך:
-      const INSAR_CSV_URL = "insar_buildings.csv";
-
-      // מצב חריגים: חריג = rate <= threshold (למשל -2 mm/yr)
-      let threshold = -2.0;
-      let highlightOutliersOnMapEnabled = false;
-
-      // ===================== STATE =====================
-      let mapInitialized = false;
-
-      // Insar DB: objectid(string) -> row
-      const insarById = new Map(); // { id, rate, extra1, extra2 }
-      let insarLoaded = false;
-      let insarLoadError = null;
-
-      // detected field name on govmap layer for objectid (OBJECTID vs objectid)
-      let objectIdFieldName = null;
-
-      // selection
-      let selectedObjectId = null;
-      let selectedAttrs = null;
-
-      // outliers cache
-      let outliersSorted = []; // [{id, rate, row}]
-      const OUTLIERS_MAX_HIGHLIGHT = 50;
-
-      // Address search state
-      let lastGeocodeReqId = 0;
-      let lastAddrItems = [];
-      let lastGeocodeQuery = "";
-      let searchTimeout = null;
-
-      // ===================== HELPERS =====================
-      function escapeHtml(s) {
-        return String(s ?? "")
-          .replace(/&/g, "&amp;")
-          .replace(/</g, "&lt;")
-          .replace(/>/g, "&gt;")
-          .replace(/"/g, "&quot;");
-      }
-
-      function fmtNum(n, digits = 1) {
-        const x = Number(n);
-        if (!Number.isFinite(x)) return "—";
-        return x.toLocaleString(undefined, { maximumFractionDigits: digits });
-      }
-
-      function toFiniteNum(v) {
-        if (v == null) return null;
-        if (typeof v === "string") {
-          let s = v.trim();
-          if (!s) return null;
-          // comma/dot handling
-          if (s.includes(",") && s.includes(".")) s = s.replace(/,/g, "");
-          else if (s.includes(",") && !s.includes(".")) s = s.replace(/,/g, ".");
-          const n = Number(s);
-          return Number.isFinite(n) ? n : null;
-        }
-        const n = Number(v);
-        return Number.isFinite(n) ? n : null;
-      }
-
-      function setMobileVh() {
-        const vh = window.innerHeight * 0.01;
-        document.documentElement.style.setProperty("--vh", `${vh}px`);
-      }
-      setMobileVh();
-      window.addEventListener("resize", setMobileVh);
-      if (window.visualViewport) window.visualViewport.addEventListener("resize", setMobileVh);
-
-      function showMessage(type, html) {
-        const box = document.getElementById("single-body");
-        if (!box) return;
-        box.innerHTML = `<div class="message message-${type}">${html}</div>`;
-      }
-
-      function switchTab(tabName) {
-        document.querySelectorAll(".tab").forEach((t) => {
-          t.classList.toggle("active", t.dataset.tab === tabName);
-        });
-        document.querySelectorAll(".tab-content").forEach((c) => {
-          c.classList.toggle("active", c.id === `tab-${tabName}`);
-        });
-
-        if (tabName === "single") renderSelected();
-        if (tabName === "outliers") renderOutliers();
-        if (tabName === "about") renderAbout();
-      }
-
-      function togglePanel() {
-        const panel = document.getElementById("info-panel");
-        if (!panel) return;
-        panel.classList.toggle("collapsed");
-        const btn = document.getElementById("panelToggleBtn");
-        if (btn) {
-          const collapsed = panel.classList.contains("collapsed");
-          btn.textContent = collapsed ? "➕ הגדל" : "➖ הקטן";
-        }
-      }
-
-      // ===================== CSV LOAD & OUTLIERS =====================
-      function guessColumns(headers) {
-        const norm = (s) => String(s || "").trim().toLowerCase().replace(/\s+/g, "");
-        const hs = (headers || []).map(norm);
-
-        const pick = (cands) => {
-          for (const c of cands) {
-            const i = hs.indexOf(norm(c));
-            if (i >= 0) return i;
-          }
-          // partial match
-          for (let i = 0; i < hs.length; i++) {
-            for (const c of cands) if (hs[i].includes(norm(c))) return i;
-          }
-          return -1;
-        };
-
-        const idIdx = pick(["objectid", "OBJECTID", "id", "buildingid", "bldg_id", "bldgid"]);
-        const rateIdx = pick(["rate", "velocity", "v", "mm/yr", "mmyr", "subsidence", "sink", "delta", "dh"]);
-
-        return { idIdx, rateIdx };
-      }
-
-      function parseCsvText(text) {
-        const lines = String(text || "")
-          .replace(/\r/g, "")
-          .split("\n")
-          .map((l) => l.trim())
-          .filter((l) => l && !l.startsWith("#"));
-
-        if (!lines.length) return { ok: false, err: "הקובץ ריק" };
-
-        const split = (line) => {
-          // simple CSV split (no quotes handling because your file is numeric/simple)
-          // supports comma or semicolon
-          const delim = line.includes(";") && !line.includes(",") ? ";" : ",";
-          return line.split(delim).map((x) => x.trim());
-        };
-
-        const first = split(lines[0]);
-        const hasHeader = first.some((c) => /[a-zA-Zא-ת]/.test(c));
-        let headers = null;
-        let start = 0;
-
-        if (hasHeader) {
-          headers = first;
-          start = 1;
-        }
-
-        const colGuess = headers ? guessColumns(headers) : { idIdx: 0, rateIdx: -1 };
-
-        // fallback rules if no header / couldn't detect rate:
-        // - if 2 cols: [id, rate]
-        // - if >=3 cols: [id, last] as rate
-        let rowsParsed = 0;
-
-        for (let i = start; i < lines.length; i++) {
-          const cols = split(lines[i]);
-          if (cols.length < 2) continue;
-
-          const idIdx = colGuess.idIdx >= 0 ? colGuess.idIdx : 0;
-          let rateIdx = colGuess.rateIdx;
-
-          if (rateIdx < 0) {
-            if (cols.length === 2) rateIdx = 1;
-            else rateIdx = cols.length - 1;
-          }
-
-          const id = cols[idIdx];
-          const rate = toFiniteNum(cols[rateIdx]);
-
-          if (!id) continue;
-          if (rate == null) {
-            // "אין נתונים" -> לא חריג
-            insarById.set(String(id).trim(), { id: String(id).trim(), rate: null, cols });
-            rowsParsed++;
-            continue;
-          }
-
-          insarById.set(String(id).trim(), { id: String(id).trim(), rate, cols });
-          rowsParsed++;
-        }
-
-        return { ok: true, rows: rowsParsed, hasHeader, headers };
-      }
-
-      async function loadInsarCsv() {
-        insarLoaded = false;
-        insarLoadError = null;
-        insarById.clear();
-
-        try {
-          const res = await fetch(INSAR_CSV_URL, { cache: "no-store" });
-          if (!res.ok) throw new Error(`fetch failed (${res.status})`);
-          const text = await res.text();
-          const parsed = parseCsvText(text);
-          if (!parsed.ok) throw new Error(parsed.err || "CSV parse error");
-
-          insarLoaded = true;
-          recomputeOutliers();
-          renderSelected();
-          renderOutliers();
-
-          console.log("✅ InSAR CSV loaded:", insarById.size, "rows");
-        } catch (e) {
-          insarLoadError = e;
-          console.error("❌ Failed loading InSAR CSV:", e);
-          renderSelected();
-          renderOutliers();
-        }
-      }
-
-      function recomputeOutliers() {
-        const t = Number(threshold);
-        const tmp = [];
-
-        for (const [id, row] of insarById.entries()) {
-          const r = row?.rate;
-          if (!Number.isFinite(r)) continue; // אין נתונים -> לא חריג
-          if (r <= t) tmp.push({ id, rate: r, row });
-        }
-
-        tmp.sort((a, b) => (a.rate - b.rate)); // הכי שלילי ראשון (הכי חריג)
-        outliersSorted = tmp;
-      }
-
-      // ===================== GOVMAP DATA (click identify) =====================
-      function fieldsToObject(fields) {
-        if (!Array.isArray(fields)) return fields;
-        const obj = {};
-        for (const f of fields) if (f?.FieldName) obj[f.FieldName] = f.Value;
-        return obj;
-      }
-
-      function detectObjectIdField(attrsObj) {
-        if (!attrsObj || typeof attrsObj !== "object") return null;
-        const keys = Object.keys(attrsObj);
-        const found = keys.find((k) => String(k).toLowerCase() === "objectid");
-        return found || null;
-      }
-
-      function getObjectIdFromAttrs(attrsObj) {
-        if (!attrsObj || typeof attrsObj !== "object") return null;
-        // try common keys
-        const candidates = ["objectid", "OBJECTID", "ObjectID"];
-        for (const c of candidates) {
-          if (attrsObj[c] != null && String(attrsObj[c]).trim() !== "") return String(attrsObj[c]).trim();
-        }
-        // fallback: scan
-        for (const k of Object.keys(attrsObj)) {
-          if (String(k).toLowerCase() === "objectid") return String(attrsObj[k]).trim();
-        }
-        return null;
-      }
-
-      function normalizeMapPoint(input) {
-        const mp = input?.mapPoint ?? input?.Point ?? input ?? null;
-        if (!mp) return null;
-        const x = mp.x ?? mp.X ?? mp.lon ?? mp.Lon ?? mp.centerX ?? mp.CenterX;
-        const y = mp.y ?? mp.Y ?? mp.lat ?? mp.Lat ?? mp.centerY ?? mp.CenterY;
-        const nx = Number(x);
-        const ny = Number(y);
-        if (!Number.isFinite(nx) || !Number.isFinite(ny)) return null;
-        return { x: nx, y: ny };
-      }
-
-      async function onMapClick(e) {
-        if (!mapInitialized) return;
-        const pt = normalizeMapPoint(e);
-        if (!pt) return;
-
-        try {
-          // This is the same call style you already used successfully
-          const resp = await govmap.getLayerData({
-            LayerName: BUILDINGS_LAYER,
-            Point: { x: pt.x, y: pt.y, X: pt.x, Y: pt.y },
-            Radius: 80,
-          });
-
-          const items = resp?.data || resp?.Data || [];
-          if (!items.length) {
-            selectedObjectId = null;
-            selectedAttrs = null;
-            renderSelected();
-            showMessage("info", "לא נמצא בניין באזור הלחיצה.");
-            return;
-          }
-
-          const first = items[0];
-          const attrsRaw = first.Fields || first.Attributes || first;
-          const attrsObj = fieldsToObject(attrsRaw) || attrsRaw || {};
-
-          // detect objectid field name once
-          const detected = detectObjectIdField(attrsObj);
-          if (detected) objectIdFieldName = detected;
-
-          const oid = getObjectIdFromAttrs(attrsObj);
-          if (!oid) {
-            selectedObjectId = null;
-            selectedAttrs = attrsObj;
-            renderSelected();
-            showMessage(
-              "error",
-              `זוהה בניין אבל לא נמצא שדה OBJECTID.<br/>שדות: <span style="direction:ltr;unicode-bidi:bidi-override">${escapeHtml(Object.keys(attrsObj).join(" | "))}</span>`
-            );
-            return;
-          }
-
-          selectedObjectId = String(oid);
-          selectedAttrs = attrsObj;
-
-          // visually highlight the selected building (blue) without turning layers UI on
-          await highlightSelectionByIds([selectedObjectId], true);
-
-          renderSelected();
-        } catch (error) {
-          console.error("❌ Error in onMapClick:", error);
-          selectedObjectId = null;
-          selectedAttrs = null;
-          renderSelected();
-          showMessage("error", `אירעה שגיאה: ${escapeHtml(error?.message || "שגיאה לא מוגדרת")}`);
-        }
-      }
-
-      // ===================== MAP HIGHLIGHT (Outliers / Selected) =====================
-      function buildWhereIn(field, ids) {
-        const safe = (ids || []).map((x) => Number(String(x).trim())).filter((n) => Number.isFinite(n));
-        if (!safe.length) return "(1=0)";
-        return `(${field} IN (${safe.join(",")}))`;
-      }
-
-      async function selectFeatures(whereClause, zoom) {
-        const params = {
-          continous: false,
-          filterLayer: false,
-          isZoomToExtent: !!zoom,
-          layers: [BUILDINGS_LAYER],
-          returnFields: { [BUILDINGS_LAYER]: ["objectid"] },
-          selectOnMap: true,
-          whereClause: { [BUILDINGS_LAYER]: whereClause },
-        };
-        return govmap.selectFeaturesOnMap(params);
-      }
-
-      async function highlightSelectionByIds(ids, zoom) {
-        if (!mapInitialized || !govmap.selectFeaturesOnMap) return;
-
-        const fieldCandidates = [];
-        if (objectIdFieldName) fieldCandidates.push(objectIdFieldName);
-        fieldCandidates.push("objectid", "OBJECTID");
-
-        const list = (ids || []).slice(0, OUTLIERS_MAX_HIGHLIGHT);
-        if (!list.length) return;
-
-        let lastErr = null;
-        for (const f of fieldCandidates) {
-          try {
-            const where = buildWhereIn(f, list);
-            await selectFeatures(where, zoom);
-            return;
-          } catch (e) {
-            lastErr = e;
-          }
-        }
-
-        console.warn("highlightSelectionByIds failed:", lastErr);
-      }
-
-      async function clearSelection() {
-        if (!mapInitialized || !govmap.selectFeaturesOnMap) return;
-        try {
-          await selectFeatures("(1=0)", false);
-        } catch (_) {
-          try { govmap.returnToDefaultTool && govmap.returnToDefaultTool(); } catch (_) {}
-        }
-        try { govmap.closeBubble && govmap.closeBubble(); } catch (_) {}
-      }
-
-      async function applyOutliersHighlightIfNeeded() {
-        if (!highlightOutliersOnMapEnabled) return;
-        if (!mapInitialized) return;
-
-        const ids = outliersSorted.slice(0, OUTLIERS_MAX_HIGHLIGHT).map((o) => o.id);
-        if (!ids.length) {
-          await clearSelection();
-          return;
-        }
-
-        // select outliers (no zoom) - highlights on map
-        await highlightSelectionByIds(ids, false);
-      }
-
-      // ===================== UI RENDER =====================
-      function renderSelected() {
-        const box = document.getElementById("single-body");
-        if (!box) return;
-
-        if (insarLoadError) {
-          box.innerHTML = `<div class="message message-error">
-            לא הצלחתי לטעון את קובץ ה־CSV של InSAR.<br/>
-            בדוק שהקובץ <strong style="direction:ltr;unicode-bidi:bidi-override">${escapeHtml(INSAR_CSV_URL)}</strong> נמצא באותו תיקייה של index.html ב־GitHub Pages.
-          </div>`;
-          return;
-        }
-
-        if (!insarLoaded) {
-          box.innerHTML = `<div class="message message-info">טוען נתוני InSAR…</div>`;
-          return;
-        }
-
-        if (!selectedObjectId) {
-          box.innerHTML = `<div class="message message-info">
-            לחץ על בניין במפה כדי לראות נתונים.<br/>
-            טיפ: השתמש בחיפוש כתובת למעלה כדי להתמקד ואז לחץ על הבניין.
-          </div>`;
-          return;
-        }
-
-        const row = insarById.get(String(selectedObjectId));
-        const rate = row?.rate;
-
-        const isOutlier = Number.isFinite(rate) && rate <= Number(threshold);
-
-        const rateText = Number.isFinite(rate) ? `${fmtNum(rate, 1)} mm/yr` : "אין נתונים";
-        const rateClass = Number.isFinite(rate) ? (isOutlier ? "bad" : "ok") : "na";
-
-        const statusMsg = Number.isFinite(rate)
-          ? (isOutlier
-              ? `<div class="message message-warn"><strong>חריג:</strong> קצב שקיעה נמוך מהסף (${fmtNum(threshold, 1)} mm/yr).</div>`
-              : `<div class="message message-info">הבניין לא חריג לפי הסף הנוכחי (${fmtNum(threshold, 1)} mm/yr).</div>`)
-          : `<div class="message message-info">אין התאמה ב־CSV לבניין הזה, לכן הוא <strong>לא</strong> נספר כחריג.</div>`;
-
-        const extraFields = selectedAttrs ? Object.keys(selectedAttrs).slice(0, 6) : [];
-
-        box.innerHTML = `
-          <div class="kpi-row">
-            <div class="kpi">
-              <div class="v ${rateClass}">${escapeHtml(rateText)}</div>
-              <div class="l">קצב (מה־CSV)</div>
-            </div>
-            <div class="kpi">
-              <div class="v ok" style="direction:ltr;text-align:center;">${escapeHtml(String(selectedObjectId))}</div>
-              <div class="l">OBJECTID</div>
-            </div>
-            <div class="kpi">
-              <div class="v ${isOutlier ? "bad" : "ok"}">${isOutlier ? "כן" : "לא"}</div>
-              <div class="l">חריג לפי סף</div>
-            </div>
-          </div>
-
-          ${statusMsg}
-
-          <button class="btn-wide gray" onclick="zoomToSelected()">🎯 התמקדות לבניין</button>
-          <button class="btn-wide ${highlightOutliersOnMapEnabled ? "danger" : "danger"}" onclick="toggleOutliersHighlight()">
-            ${highlightOutliersOnMapEnabled ? "🟥 הדגשת חריגים: פעיל (כבה)" : "🟥 הדגש חריגים על המפה (טופ 50)"}
+<template>
+  <div class="app" dir="rtl">
+    <!-- Header -->
+    <header class="header">
+      <div class="brand">
+        <div class="title">SatMap</div>
+        <div class="sub">
+          Prototype – בניינים + InSAR (CSV) + סימון חריגים על גבי GOVMAP
+        </div>
+      </div>
+
+      <div class="headerBtns">
+        <button class="btn ghost" @click="panelOpen = !panelOpen">
+          {{ panelOpen ? "סגור תפריט" : "פתח תפריט" }}
+        </button>
+        <button class="btn" @click="reloadAll" :disabled="busy">
+          {{ busy ? "טוען..." : "טען מחדש" }}
+        </button>
+      </div>
+    </header>
+
+    <div class="body">
+      <!-- Side Panel -->
+      <aside class="panel" :class="{ open: panelOpen }">
+        <div class="tabs">
+          <button class="tab" :class="{ on: mode === 'subsidence' }" @click="mode = 'subsidence'">
+            בניינים שוקעים
           </button>
-
-          ${selectedAttrs ? `
-            <div class="message message-info">
-              שדות לדוגמה מהשכבה (לבדיקה):<br/>
-              <span style="direction:ltr;unicode-bidi:bidi-override">${escapeHtml(extraFields.join(" | "))}${selectedAttrs && Object.keys(selectedAttrs).length > 6 ? " | …" : ""}</span>
-            </div>
-          ` : ""}
-        `;
-      }
-
-      function renderOutliers() {
-        const box = document.getElementById("outliers-body");
-        if (!box) return;
-
-        if (insarLoadError) {
-          box.innerHTML = `<div class="message message-error">
-            אין נתוני חריגים כי ה־CSV לא נטען.
-          </div>`;
-          return;
-        }
-        if (!insarLoaded) {
-          box.innerHTML = `<div class="message message-info">טוען נתוני InSAR…</div>`;
-          return;
-        }
-
-        const count = outliersSorted.length;
-
-        let html = `
-          <div class="message message-info">
-            סף חריגים: <strong style="direction:ltr;unicode-bidi:bidi-override">${fmtNum(threshold, 1)} mm/yr</strong><br/>
-            חריגים (עם נתונים בלבד): <strong>${count.toLocaleString()}</strong><br/>
-            מודגשים על המפה: <strong>טופ ${OUTLIERS_MAX_HIGHLIGHT}</strong> (אם הדגשה פעילה)
-          </div>
-
-          <button class="btn-wide ${highlightOutliersOnMapEnabled ? "danger" : "danger"}" onclick="toggleOutliersHighlight()">
-            ${highlightOutliersOnMapEnabled ? "🟥 הדגשת חריגים: פעיל (כבה)" : "🟥 הדגש חריגים על המפה (טופ 50)"}
+          <button class="tab" :class="{ on: mode === 'observations' }" @click="mode = 'observations'">
+            תצפיות / נתונים
           </button>
-        `;
+          <button class="tab" :class="{ on: mode === 'about' }" @click="mode = 'about'">
+            איך זה עובד
+          </button>
+        </div>
 
-        if (!count) {
-          html += `<div class="message message-warn">לא נמצאו חריגים לפי הסף הנוכחי.</div>`;
-          box.innerHTML = html;
-          return;
-        }
-
-        const top = outliersSorted.slice(0, 200); // רשימה ל־UI (עד 200)
-
-        html += `<div class="outlier-list">`;
-        top.forEach((o, idx) => {
-          html += `
-            <div class="outlier-row" onclick="selectOutlier('${escapeHtml(o.id)}')">
-              <div class="pill">${idx + 1}</div>
-              <div class="outlier-id">${escapeHtml(o.id)}</div>
-              <div class="outlier-rate">
-                ${fmtNum(o.rate, 1)} mm/yr
-                <small>לחץ כדי להתמקד ולהדגיש</small>
+        <!-- ================= SUBSIDENCE ================= -->
+        <section v-if="mode === 'subsidence'" class="section">
+          <div class="box">
+            <div class="row2">
+              <div>
+                <label>סף “שוקע/חשוד” v (mm/yr)</label>
+                <input class="input" type="number" v-model.number="rateThreshold" step="0.5" />
+                <div class="hint">
+                  ברירת מחדל: ‎-2 (כל ערך קטן/שווה לסף נחשב “שוקע”).
+                </div>
+              </div>
+              <div>
+                <label>מינימום תצפיות (אופציונלי)</label>
+                <input class="input" type="number" v-model.number="minObservations" step="1" min="0" />
+                <div class="hint">
+                  אם בעמודה ב־CSV יש num_obs / n / count – נסנן גם לפיה.
+                </div>
               </div>
             </div>
-          `;
-        });
-        html += `</div>`;
 
-        box.innerHTML = html;
-      }
+            <div class="row2">
+              <div>
+                <label>חפש לפי OBJECTID</label>
+                <div class="inline">
+                  <input class="input" type="number" v-model.number="searchObjectId" placeholder="לדוגמה: 12345" />
+                  <button class="btn" @click="jumpToObjectId" :disabled="!searchObjectId || !mapReady">
+                    קפוץ
+                  </button>
+                </div>
+                <div class="hint">
+                  אם יש ל־CSV נקודת X/Y – נבצע התמקדות לפי הנקודה. אחרת רק נבחר רשומה.
+                </div>
+              </div>
 
-      function renderAbout() {
-        const box = document.getElementById("about-body");
-        if (!box) return;
-
-        box.innerHTML = `
-          <div class="message message-info">
-            <strong>איך זה עובד (בקצרה)</strong><br/>
-            1) שכבת הבניינים תמיד דלוקה ב־GovMap.<br/>
-            2) הנתונים (CSV) נטענים מהאתר שלך (GitHub Pages / localhost).<br/>
-            3) “חריג” = ערך קצב (mm/yr) קטן/שווה לסף שהגדרת (למשל -2).<br/>
-            4) “אין נתונים” (אין שורה ב־CSV / ערך לא מספרי) – <strong>לא</strong> נחשב חריג ולא מודגש.
-          </div>
-
-          <div class="message message-warn">
-            <strong>מה צריך בריפו:</strong><br/>
-            - index.html (הקובץ הזה)<br/>
-            - <span style="direction:ltr;unicode-bidi:bidi-override"><strong>${escapeHtml(INSAR_CSV_URL)}</strong></span> (CSV InSAR)
-          </div>
-        `;
-      }
-
-      // ===================== UI ACTIONS =====================
-      async function zoomToSelected() {
-        if (!selectedObjectId) return;
-        await highlightSelectionByIds([selectedObjectId], true);
-      }
-
-      async function selectOutlier(id) {
-        selectedObjectId = String(id);
-        selectedAttrs = null; // לא חובה
-        await highlightSelectionByIds([selectedObjectId], true);
-        switchTab("single");
-      }
-
-      async function toggleOutliersHighlight() {
-        highlightOutliersOnMapEnabled = !highlightOutliersOnMapEnabled;
-        await applyOutliersHighlightIfNeeded();
-        renderSelected();
-        renderOutliers();
-      }
-
-      function onThresholdChanged(v) {
-        const n = toFiniteNum(v);
-        if (n == null) return;
-        threshold = n;
-        recomputeOutliers();
-        renderSelected();
-        renderOutliers();
-        // לא מדגיש אוטומטית כדי לא “לקפוץ”/להעמיס – רק אם המשתמש הפעיל הדגשה
-        applyOutliersHighlightIfNeeded();
-      }
-
-      // ===================== ADDRESS SEARCH (same behavior/style) =====================
-      function getAddrEls() {
-        const root = document.getElementById("top-searchbar");
-        if (!root) return { root: null, input: null, btn: null, box: null };
-        return {
-          root,
-          input: root.querySelector("#addrInput"),
-          btn: root.querySelector("#addrBtn"),
-          box: root.querySelector("#addrResults"),
-        };
-      }
-
-      function parseGeocodeList(resp) {
-        const list = resp?.data || resp?.Data || resp?.results || resp;
-        if (Array.isArray(list)) return list;
-        if (Array.isArray(list?.Result)) return list.Result;
-        return [];
-      }
-
-      function extractXY(item) {
-        const x = item?.X ?? item?.x ?? item?.CenterX ?? item?.centerX ?? item?.Lon ?? item?.lon;
-        const y = item?.Y ?? item?.y ?? item?.CenterY ?? item?.centerY ?? item?.Lat ?? item?.lat;
-        return { x: Number(x), y: Number(y) };
-      }
-
-      function isBadTitle(t) {
-        const s = String(t ?? "").trim();
-        if (!s) return true;
-        const low = s.toLowerCase();
-        return (s === "תוצאה" || low === "result" || low === "results" || low === "unknown");
-      }
-
-      function setAddrLoading(msg) {
-        const { box } = getAddrEls();
-        if (!box) return;
-        box.style.display = "block";
-        box.innerHTML = `<div class="addr-item">${escapeHtml(msg || "מחפש…")}</div>`;
-      }
-
-      function renderAddrResults(items) {
-        const { box } = getAddrEls();
-        if (!box) return;
-
-        lastAddrItems = items || [];
-
-        if (!items || !items.length) {
-          box.style.display = "block";
-          box.innerHTML = `<div class="addr-item">לא נמצאו תוצאות</div>`;
-          return;
-        }
-
-        box.style.display = "block";
-        box.innerHTML = items.map((it, idx) => {
-          const title = escapeHtml(it.__title || lastGeocodeQuery || "תוצאה");
-          const sub = escapeHtml(it.__sub || "");
-          return `
-            <div class="addr-item" data-idx="${idx}">
-              <div style="font-weight:1000; color:#111;">${title}</div>
-              ${sub ? `<div class="addr-sub">${sub}</div>` : ""}
+              <div>
+                <label>שכבת בניינים (אופציונלי)</label>
+                <input class="input" type="text" v-model="buildingsLayerName" placeholder="למשל: BUILDINGS_LAYER_NAME" />
+                <div class="hint">
+                  אם תמלא כאן “שם שכבה” תקין של GOVMAP, נשתמש בו גם לתשאול בלחיצה (identify/getLayerData).
+                </div>
+              </div>
             </div>
-          `;
-        }).join("");
 
-        box.querySelectorAll(".addr-item").forEach((el) => {
-          el.addEventListener("click", () => {
-            const idx = Number(el.dataset.idx);
-            const picked = lastAddrItems[idx];
-            if (picked) focusToGeocodeItem(picked);
-            box.style.display = "none";
-          });
-        });
-      }
-
-      function focusToGeocodeItem(item) {
-        if (!mapInitialized) return;
-        const { x, y } = extractXY(item);
-        if (!Number.isFinite(x) || !Number.isFinite(y)) return;
-
-        try { govmap.zoomToXY({ x, y, level: 10, marker: true }); } catch (_) {}
-
-        const label = !isBadTitle(item.__title) ? item.__title : (lastGeocodeQuery || "תוצאה");
-        const box = document.getElementById("single-body");
-        if (box && !selectedObjectId) {
-          showMessage("info", `התמקדתי לכתובת: <strong>${escapeHtml(label)}</strong><br/>עכשיו לחץ על הבניין כדי לראות נתונים.`);
-        }
-      }
-
-      function runGeocode(query) {
-        const q = String(query || "").trim();
-        if (!q) return;
-
-        lastGeocodeQuery = q;
-
-        if (!mapInitialized) return;
-
-        const myId = ++lastGeocodeReqId;
-        setAddrLoading("מחפש כתובת…");
-
-        const payload = { keyword: q };
-        if (govmap.geocodeType?.AccuracyOnly) payload.type = govmap.geocodeType.AccuracyOnly;
-
-        let res;
-        try { res = govmap.geocode(payload); }
-        catch (_) {
-          renderAddrResults([]);
-          return;
-        }
-
-        const onSuccess = (resp) => {
-          if (myId !== lastGeocodeReqId) return;
-
-          const list = parseGeocodeList(resp);
-          if (!list || !list.length) {
-            renderAddrResults([]);
-            return;
-          }
-
-          const mapped = list.slice(0, 10).map((r) => {
-            const candidates = [
-              r?.SettlementName, r?.settlementName,
-              r?.PlaceName, r?.placeName,
-              r?.Name, r?.name,
-              r?.ResultLabel, r?.resultLabel,
-              r?.Address, r?.address,
-              r?.Title, r?.title,
-              r?.label,
-            ].map((x) => (x == null ? "" : String(x).trim())).filter(Boolean);
-
-            let title = candidates.find((t) => !isBadTitle(t)) || q;
-            let sub = r?.City || r?.city || r?.Region || r?.region || r?.Street || r?.street || r?.SubTitle || r?.subTitle || "";
-            sub = String(sub || "").trim();
-            return { ...r, __title: title, __sub: sub };
-          });
-
-          renderAddrResults(mapped);
-        };
-
-        const onFail = () => {
-          if (myId !== lastGeocodeReqId) return;
-          renderAddrResults([]);
-        };
-
-        if (res && typeof res.then === "function") res.then(onSuccess).catch(onFail);
-        else if (res && typeof res.done === "function") res.done(onSuccess).fail(onFail);
-        else onFail();
-      }
-
-      function initAddressSearchUI() {
-        const { input, btn, box } = getAddrEls();
-        if (!input || !btn || !box) return;
-
-        btn.addEventListener("click", () => {
-          const q = String(input.value || "").trim();
-          if (!q) return;
-
-          const sameQuery = String(lastGeocodeQuery || "").trim() === q;
-          if (sameQuery && Array.isArray(lastAddrItems) && lastAddrItems.length) {
-            const exact = lastAddrItems.find((it) => String(it?.__title || "").trim() === q) || lastAddrItems[0];
-            focusToGeocodeItem(exact);
-            box.style.display = "none";
-            return;
-          }
-          runGeocode(q);
-        });
-
-        input.addEventListener("keydown", (e) => {
-          if (e.key === "Enter") { e.preventDefault(); btn.click(); }
-          if (e.key === "Escape") box.style.display = "none";
-        });
-
-        input.addEventListener("input", () => {
-          if (searchTimeout) clearTimeout(searchTimeout);
-          const v = input.value.trim();
-          if (v.length < 3) {
-            box.style.display = "none";
-            return;
-          }
-          searchTimeout = setTimeout(() => runGeocode(v), 350);
-        });
-
-        document.addEventListener("click", (e) => {
-          if (!box.contains(e.target) && e.target !== input && e.target !== btn) {
-            box.style.display = "none";
-          }
-        });
-      }
-
-      // ===================== GOVMAP INIT =====================
-      function initGovMap() {
-        // Load CSV immediately (even before map load is OK)
-        loadInsarCsv();
-
-        // init UI controls
-        const th = document.getElementById("thresholdInput");
-        if (th) {
-          th.value = String(threshold);
-          th.addEventListener("change", (e) => onThresholdChanged(e.target.value));
-          th.addEventListener("input", (e) => onThresholdChanged(e.target.value));
-        }
-
-        const toggleBtn = document.getElementById("panelToggleBtn");
-        if (toggleBtn) toggleBtn.addEventListener("click", togglePanel);
-
-        // Create map: layersMode 4 => hides layers button
-        govmap.createMap("map", {
-          token: TOKEN,
-          layers: [BUILDINGS_LAYER],
-          visibleLayers: [BUILDINGS_LAYER],
-          layersMode: 4,          // ✅ אין כפתור שכבות
-          background: 3,
-          zoomButtons: true,
-          identifyOnClick: false,
-          isEmbeddedToggle: false,
-          onLoad: () => {
-            mapInitialized = true;
-
-            try {
-              govmap.onEvent(govmap.events.CLICK).progress((e) => {
-                const pt = normalizeMapPoint(e);
-                if (!pt) return;
-                onMapClick({ mapPoint: pt, __fromGovmap: true });
-              });
-            } catch (_) {}
-
-            initAddressSearchUI();
-
-            const l = document.getElementById("loading");
-            if (l) l.style.display = "none";
-
-            // default tab
-            switchTab("single");
-            renderAbout();
-
-            console.log("✅ Map initialized");
-          },
-        });
-      }
-
-      // Expose for inline onclick
-      window.initGovMap = initGovMap;
-      window.switchTab = switchTab;
-      window.togglePanel = togglePanel;
-      window.toggleOutliersHighlight = toggleOutliersHighlight;
-      window.zoomToSelected = zoomToSelected;
-      window.selectOutlier = selectOutlier;
-    </script>
-
-    <script src="https://www.govmap.gov.il/govmap/api/govmap.api.js" defer onload="initGovMap()"></script>
-  </head>
-
-  <body>
-    <div id="loading">
-      <div class="spinner"></div>
-      <div style="font-size: 14px; color: #333; font-weight: 1000">טוען מפה…</div>
-    </div>
-
-    <div id="map"></div>
-
-    <!-- Top Always-Open Search Bar (CrimesMap style) -->
-    <div id="top-searchbar">
-      <button id="addrBtn" type="button">חפש</button>
-      <input id="addrInput" type="text" placeholder="לדוגמה: דיזנגוף 50 תל אביב" autocomplete="off" />
-      <div id="addrResults"></div>
-    </div>
-
-    <div id="info-panel">
-      <div id="panel-header">
-        <h1>🏢 SatMap – בניינים שוקעים</h1>
-        <p>
-          שכבה: <strong>בניינים</strong> • חריג = <strong>rate ≤ סף</strong><br />
-          “אין נתונים” לא נחשב חריג ולא מודגש
-        </p>
-
-        <div id="header-actions">
-          <button class="hbtn secondary" onclick="switchTab('about')">ℹ️ אודות</button>
-          <button id="panelToggleBtn" class="hbtn secondary" title="כיווץ/הרחבה">➖ הקטן</button>
-        </div>
-      </div>
-
-      <div id="tabs">
-        <div class="tab active" data-tab="single" onclick="switchTab('single')">נבחר</div>
-        <div class="tab" data-tab="outliers" onclick="switchTab('outliers')">חריגים</div>
-        <div class="tab" data-tab="about" onclick="switchTab('about')">הסבר</div>
-      </div>
-
-      <div id="controls">
-        <div class="controls-grid">
-          <div class="ctl">
-            <label>סף חריגים (mm/yr)</label>
-            <input id="thresholdInput" type="number" step="0.5" />
-          </div>
-          <div class="ctl">
-            <label>הערה</label>
-            <div style="padding:10px 12px;border:1px solid #e7e7e7;border-radius:12px;background:#fff;font-weight:900;font-size:13px;color:#333">
-              לדוגמה: -2 מסמן שקיעה חשודה
+            <div class="stats">
+              <div class="pill">
+                <div class="k">CSV</div>
+                <div class="v">{{ csvStatus }}</div>
+              </div>
+              <div class="pill">
+                <div class="k">סך רשומות</div>
+                <div class="v">{{ rows.length }}</div>
+              </div>
+              <div class="pill">
+                <div class="k">שוקעים</div>
+                <div class="v">{{ filteredRows.length }}</div>
+              </div>
             </div>
           </div>
-        </div>
-      </div>
 
-      <div id="info-content">
-        <div class="tab-content active" id="tab-single">
-          <div id="single-body"></div>
+          <div class="box">
+            <div class="boxTitle">רשימת בניינים שוקעים (Top 200)</div>
+
+            <div v-if="filteredRows.length === 0" class="empty">
+              אין נתונים שעוברים את הסף. בדוק שה־CSV נטען ושיש עמודת מהירות (v / velocity / rate).
+            </div>
+
+            <div v-else class="list">
+              <button
+                v-for="r in topRows"
+                :key="r.__key"
+                class="listItem"
+                :class="{ active: selected?.__key === r.__key }"
+                @click="selectRow(r)"
+              >
+                <div class="liMain">
+                  <div class="liTitle">
+                    OBJECTID: <b>{{ r.objectId ?? "—" }}</b>
+                  </div>
+                  <div class="liSub">
+                    v: <b>{{ fmt(r.rate) }}</b> mm/yr
+                    <span v-if="r.obs != null"> · n={{ r.obs }}</span>
+                    <span v-if="r.x != null && r.y != null"> · X/Y ✓</span>
+                  </div>
+                </div>
+                <div class="liRight">→</div>
+              </button>
+            </div>
+          </div>
+
+          <div class="box" v-if="selected">
+            <div class="boxTitle">פרטי בניין נבחר</div>
+            <div class="kv">
+              <div class="k">OBJECTID</div>
+              <div class="v">{{ selected.objectId ?? "—" }}</div>
+            </div>
+            <div class="kv">
+              <div class="k">v (mm/yr)</div>
+              <div class="v">{{ fmt(selected.rate) }}</div>
+            </div>
+            <div class="kv">
+              <div class="k">תצפיות</div>
+              <div class="v">{{ selected.obs ?? "—" }}</div>
+            </div>
+            <div class="kv">
+              <div class="k">X / Y</div>
+              <div class="v">
+                <span v-if="selected.x != null && selected.y != null">{{ selected.x }}, {{ selected.y }}</span>
+                <span v-else>—</span>
+              </div>
+            </div>
+
+            <div class="actions">
+              <button class="btn" @click="focusSelected" :disabled="!mapReady || !hasXY(selected)">
+                התמקדות במפה
+              </button>
+              <button class="btn ghost" @click="clearOverlays" :disabled="!mapReady">
+                נקה סימונים
+              </button>
+            </div>
+
+            <details class="raw">
+              <summary>Raw row</summary>
+              <pre>{{ selected.raw }}</pre>
+            </details>
+          </div>
+        </section>
+
+        <!-- ================= OBSERVATIONS ================= -->
+        <section v-else-if="mode === 'observations'" class="section">
+          <div class="box">
+            <div class="boxTitle">קבצים ציבוריים</div>
+            <div class="hint">
+              הפרונט טוען את ה־CSV מתוך <code>client/public/insar_buildings.csv</code>
+              (או מהשורש בפריסה של Vite).
+            </div>
+
+            <div class="kv">
+              <div class="k">CSV URL</div>
+              <div class="v">
+                <code>{{ csvUrl }}</code>
+              </div>
+            </div>
+
+            <div class="kv">
+              <div class="k">סטטוס</div>
+              <div class="v">{{ csvStatus }}</div>
+            </div>
+
+            <div class="actions">
+              <button class="btn" @click="loadCsv" :disabled="busy">טען CSV</button>
+              <button class="btn ghost" @click="drawFilteredOnMap" :disabled="!mapReady || filteredRows.length === 0">
+                צייר את כל השוקעים על המפה
+              </button>
+            </div>
+          </div>
+
+          <div class="box">
+            <div class="boxTitle">הערות פורמט CSV (מה שהאפליקציה יודעת לזהות)</div>
+            <ul class="ul">
+              <li>
+                OBJECTID: אחת מהעמודות:
+                <code>OBJECTID</code>, <code>objectid</code>, <code>id</code>, <code>building_id</code>
+              </li>
+              <li>
+                rate(mm/yr): אחת מהעמודות:
+                <code>v</code>, <code>velocity</code>, <code>rate</code>, <code>rate_mm_yr</code>, <code>mm_yr</code>
+              </li>
+              <li>
+                תצפיות (אופציונלי):
+                <code>num_obs</code>, <code>n</code>, <code>count</code>
+              </li>
+              <li>
+                קואורדינטות (אם קיימות): <code>x</code>/<code>y</code> או <code>X</code>/<code>Y</code>
+                (עדיף ב־ITM כדי שיתאים ל־GOVMAP).
+              </li>
+            </ul>
+          </div>
+        </section>
+
+        <!-- ================= ABOUT ================= -->
+        <section v-else class="section">
+          <div class="box">
+            <div class="boxTitle">מה קורה פה</div>
+            <div class="p">
+              1) נטענת מפה של GOVMAP בעזרת <code>govmap.api.js</code> ונוצר Map בתוך ה־DIV.
+            </div>
+            <div class="p">
+              2) נטען <code>insar_buildings.csv</code> ומחולצים מזהים + מהירות שקיעה (mm/yr) + (אופציונלי) X/Y.
+            </div>
+            <div class="p">
+              3) כשבוחרים בניין או כשלוחצים “צייר שוקעים”, האפליקציה מציירת סימונים על המפה באמצעות
+              <code>govmap.displayGeometries</code> (כאן כעיגולים קטנים). :contentReference[oaicite:0]{index=0}
+            </div>
+            <div class="p">
+              אם אתה רוצה גם “לשאול” שכבת בניינים בלחיצה (ולקבל פרטי ישות), תמלא שם שכבה תקין ב־“שכבת בניינים”
+              ותוכל להרחיב את ה־onClick כדי לקרוא ל־<code>identifyByXYAndLayer</code>/<code>getLayerData</code>. :contentReference[oaicite:1]{index=1}
+            </div>
+          </div>
+
+          <div class="box">
+            <div class="boxTitle">טוקן GOVMAP</div>
+            <div class="p">
+              האפליקציה מצפה ל־<code>VITE_GOVMAP_TOKEN</code> (דרך Vite env). את המפה יוצרים עם
+              <code>govmap.createMap</code>. :contentReference[oaicite:2]{index=2}
+            </div>
+          </div>
+        </section>
+      </aside>
+
+      <!-- Map -->
+      <main class="mapWrap">
+        <div class="mapTopBar">
+          <div class="mapStatus">
+            <span class="dot" :class="{ ok: mapReady }"></span>
+            <span>{{ mapReady ? "מפה מוכנה" : "טוען GOVMAP..." }}</span>
+            <span v-if="mapError" class="err"> · {{ mapError }}</span>
+          </div>
+
+          <div class="mapBtns">
+            <button class="btn ghost" @click="drawFilteredOnMap" :disabled="!mapReady || filteredRows.length === 0">
+              צייר שוקעים
+            </button>
+            <button class="btn ghost" @click="clearOverlays" :disabled="!mapReady">
+              נקה
+            </button>
+          </div>
         </div>
 
-        <div class="tab-content" id="tab-outliers">
-          <div id="outliers-body"></div>
-        </div>
+        <div id="govmap" class="map"></div>
 
-        <div class="tab-content" id="tab-about">
-          <div id="about-body"></div>
+        <div class="mapHint">
+          טיפ: GOVMAP עובד עם token שמוגבל לדומיין. אם המפה לא נטענת — בדוק שהטוקן מאושר ל־GitHub Pages.
         </div>
-      </div>
+      </main>
     </div>
-  </body>
-</html>
+  </div>
+</template>
+
+<script setup>
+import { computed, onMounted, ref, watch } from "vue";
+
+/**
+ * =========================
+ * Config (Vite env)
+ * =========================
+ */
+const GOVMAP_TOKEN = import.meta.env.VITE_GOVMAP_TOKEN || "";
+const GOVMAP_LAYERS = (import.meta.env.VITE_GOVMAP_LAYERS || "")
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
+
+const csvUrl = new URL("insar_buildings.csv", import.meta.env.BASE_URL).toString();
+
+/**
+ * =========================
+ * UI State
+ * =========================
+ */
+const panelOpen = ref(true);
+const mode = ref("subsidence"); // subsidence | observations | about
+
+const busy = ref(false);
+const mapReady = ref(false);
+const mapError = ref("");
+
+const csvStatus = ref("לא נטען עדיין");
+const rows = ref([]);
+const selected = ref(null);
+
+const rateThreshold = ref(-2);
+const minObservations = ref(0);
+const searchObjectId = ref(null);
+const buildingsLayerName = ref(import.meta.env.VITE_BUILDINGS_LAYER_NAME || "");
+
+/**
+ * =========================
+ * Derived
+ * =========================
+ */
+const filteredRows = computed(() => {
+  const thr = Number(rateThreshold.value);
+  const minObs = Number(minObservations.value || 0);
+
+  return rows.value
+    .filter((r) => Number.isFinite(r.rate))
+    .filter((r) => r.rate <= thr)
+    .filter((r) => (minObs > 0 ? (r.obs ?? 0) >= minObs : true))
+    .sort((a, b) => a.rate - b.rate);
+});
+
+const topRows = computed(() => filteredRows.value.slice(0, 200));
+
+/**
+ * =========================
+ * GovMap Script Loader
+ * =========================
+ */
+function loadScriptOnce(src) {
+  return new Promise((resolve, reject) => {
+    const existing = document.querySelector(`script[data-src="${src}"]`);
+    if (existing) {
+      // Already appended; wait until govmap exists.
+      const t = setInterval(() => {
+        if (window.govmap) {
+          clearInterval(t);
+          resolve();
+        }
+      }, 50);
+      setTimeout(() => {
+        clearInterval(t);
+        if (window.govmap) resolve();
+        else reject(new Error("govmap.api.js נטען אבל window.govmap לא זמין"));
+      }, 12000);
+      return;
+    }
+
+    const script = document.createElement("script");
+    script.src = src;
+    script.defer = true;
+    script.dataset.src = src;
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error("נכשל לטעון govmap.api.js"));
+    document.head.appendChild(script);
+  });
+}
+
+async function ensureGovMapLoaded() {
+  if (window.govmap) return;
+  await loadScriptOnce("https://www.govmap.gov.il/govmap/api/govmap.api.js");
+
+  // Wait until the API attaches to window
+  const start = Date.now();
+  while (!window.govmap && Date.now() - start < 12000) {
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  if (!window.govmap) throw new Error("window.govmap לא זמין אחרי טעינת הסקריפט");
+}
+
+/**
+ * =========================
+ * Map init
+ * =========================
+ */
+async function initMap() {
+  mapReady.value = false;
+  mapError.value = "";
+
+  if (!GOVMAP_TOKEN) {
+    mapError.value = "חסר VITE_GOVMAP_TOKEN";
+    return;
+  }
+
+  try {
+    await ensureGovMapLoaded();
+
+    // Create map
+    window.govmap.createMap("govmap", {
+      token: GOVMAP_TOKEN,
+      layers: GOVMAP_LAYERS,
+      showXY: true,
+      identifyOnClick: true,
+      isEmbeddedToggle: false,
+      background: "1",
+      layersMode: 1,
+      zoomButtons: true,
+      onLoad: () => {
+        mapReady.value = true;
+      },
+      onError: (e) => {
+        mapError.value = (e && (e.message || e.toString())) || "שגיאה לא ידועה בטעינת המפה";
+      },
+      onClick: (e) => {
+        // אפשר להרחיב: אם buildingsLayerName מוגדר, לקרוא identifyByXYAndLayer / getLayerData
+        // ולפתוח חלון נתונים משלך.
+        // כרגע נשמור את הקליק כדי שתוכל לראות בקונסול.
+        // eslint-disable-next-line no-console
+        console.log("GovMap onClick:", e);
+      },
+    });
+
+    // אם onLoad לא מגיע (לפעמים), נעשה fallback:
+    setTimeout(() => {
+      if (!mapReady.value && window.govmap) mapReady.value = true;
+    }, 2500);
+  } catch (err) {
+    mapError.value = err?.message || String(err);
+  }
+}
+
+/**
+ * =========================
+ * CSV parsing
+ * =========================
+ */
+function splitCsvLine(line) {
+  // Simple CSV splitter supporting quotes
+  const out = [];
+  let cur = "";
+  let inQ = false;
+
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+
+    if (ch === '"') {
+      if (inQ && line[i + 1] === '"') {
+        cur += '"';
+        i++;
+      } else {
+        inQ = !inQ;
+      }
+      continue;
+    }
+
+    if (ch === "," && !inQ) {
+      out.push(cur);
+      cur = "";
+      continue;
+    }
+
+    cur += ch;
+  }
+  out.push(cur);
+  return out.map((s) => s.trim());
+}
+
+function pickHeader(headers, candidates) {
+  const lower = headers.map((h) => String(h).trim());
+  for (const c of candidates) {
+    const idx = lower.findIndex((h) => h.toLowerCase() === c.toLowerCase());
+    if (idx !== -1) return { name: headers[idx], idx };
+  }
+  // fallback: contains
+  for (const c of candidates) {
+    const idx = lower.findIndex((h) => h.toLowerCase().includes(c.toLowerCase()));
+    if (idx !== -1) return { name: headers[idx], idx };
+  }
+  return null;
+}
+
+function toNum(v) {
+  if (v == null) return null;
+  const s = String(v).trim();
+  if (!s) return null;
+  const n = Number(s.replaceAll(" ", ""));
+  return Number.isFinite(n) ? n : null;
+}
+
+function hasXY(r) {
+  return r && Number.isFinite(r.x) && Number.isFinite(r.y);
+}
+
+async function loadCsv() {
+  busy.value = true;
+  csvStatus.value = "טוען...";
+  try {
+    const res = await fetch(csvUrl, { cache: "no-store" });
+    if (!res.ok) throw new Error(`CSV HTTP ${res.status}`);
+    const text = await res.text();
+
+    const lines = text
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .filter((l) => l.length > 0);
+
+    if (lines.length < 2) {
+      rows.value = [];
+      csvStatus.value = "CSV ריק / לא תקין";
+      return;
+    }
+
+    const headers = splitCsvLine(lines[0]);
+
+    const hObj = pickHeader(headers, ["OBJECTID", "objectid", "id", "building_id", "object_id"]);
+    const hRate = pickHeader(headers, ["v", "velocity", "rate", "rate_mm_yr", "mm_yr", "subsidence"]);
+    const hObs = pickHeader(headers, ["num_obs", "n", "count", "observations", "numobs"]);
+    const hX = pickHeader(headers, ["x", "X", "easting", "east"]);
+    const hY = pickHeader(headers, ["y", "Y", "northing", "north"]);
+
+    const parsed = [];
+    for (let i = 1; i < lines.length; i++) {
+      const cols = splitCsvLine(lines[i]);
+      const rawObj = {};
+      for (let j = 0; j < headers.length; j++) rawObj[headers[j]] = cols[j];
+
+      const objectId = hObj ? toNum(cols[hObj.idx]) : null;
+      const rate = hRate ? toNum(cols[hRate.idx]) : null;
+      const obs = hObs ? toNum(cols[hObs.idx]) : null;
+      const x = hX ? toNum(cols[hX.idx]) : null;
+      const y = hY ? toNum(cols[hY.idx]) : null;
+
+      parsed.push({
+        __key: `${objectId ?? "na"}-${i}`,
+        objectId,
+        rate,
+        obs,
+        x,
+        y,
+        raw: rawObj,
+      });
+    }
+
+    rows.value = parsed;
+    csvStatus.value = `נטען (${parsed.length} שורות)`;
+  } catch (err) {
+    rows.value = [];
+    csvStatus.value = `שגיאה: ${err?.message || String(err)}`;
+  } finally {
+    busy.value = false;
+  }
+}
+
+/**
+ * =========================
+ * Map overlays (GovMap)
+ * =========================
+ */
+async function clearOverlays() {
+  if (!mapReady.value || !window.govmap) return;
+  try {
+    // ננקה את כל הגאומטריות שציירנו לפי שם prefix (פשוט יותר: נצייר תמיד עם clearExisting)
+    // כאן נשאיר את זה פשוט:
+    await window.govmap.displayGeometries({
+      circleGeometries: [],
+      names: [],
+      geometryType: window.govmap.geometryType.CIRCLE,
+      defaultSymbol: { outlineColor: [255, 0, 0, 1], outlineWidth: 1, fillColor: [255, 0, 0, 0.25] },
+      symbols: [],
+      clearExisting: true,
+      data: { tooltips: [], headers: [], bubbles: [], bubbleUrl: "" },
+    });
+  } catch (e) {
+    // eslint-disable-next-line no-console
+    console.warn("clearOverlays failed:", e);
+  }
+}
+
+async function drawCirclesOnMap(items) {
+  if (!mapReady.value || !window.govmap) return;
+  const usable = items.filter(hasXY);
+  if (usable.length === 0) return;
+
+  // עיגולים קטנים סביב נקודות (X/Y)
+  const circles = usable.map((r) => ({ x: r.x, y: r.y, radius: 10 }));
+  const names = usable.map((r) => `b_${r.objectId ?? r.__key}`);
+  const tooltips = usable.map((r) => `OBJECTID ${r.objectId ?? "—"} | v=${fmt(r.rate)} mm/yr`);
+  const headers = usable.map((r) => `בניין ${r.objectId ?? "—"}`);
+
+  try {
+    await window.govmap.displayGeometries({
+      circleGeometries: circles,
+      names,
+      geometryType: window.govmap.geometryType.CIRCLE,
+      defaultSymbol: {
+        outlineColor: [255, 0, 0, 1],
+        outlineWidth: 2,
+        fillColor: [255, 0, 0, 0.25],
+      },
+      symbols: [],
+      clearExisting: true,
+      showBubble: true,
+      data: {
+        tooltips,
+        headers,
+        bubbles: new Array(usable.length).fill(""),
+        bubbleUrl: "",
+        bubbleHTML:
+          "<div style='padding:10px;font-family:Arial;direction:rtl'><div style='font-weight:700;margin-bottom:6px'>{0}</div><div>v (mm/yr): <b>{1}</b></div><div>תצפיות: <b>{2}</b></div><div style='margin-top:6px;font-size:12px;opacity:.75'>X/Y: {3}, {4}</div></div>",
+        bubbleHTMLParameters: usable.map((r) => [
+          `OBJECTID ${r.objectId ?? "—"}`,
+          fmt(r.rate),
+          r.obs ?? "—",
+          r.x ?? "—",
+          r.y ?? "—",
+        ]),
+      },
+    });
+  } catch (e) {
+    // eslint-disable-next-line no-console
+    console.warn("drawCirclesOnMap failed:", e);
+  }
+}
+
+function focusXY(x, y, level = 9) {
+  if (!mapReady.value || !window.govmap) return;
+  try {
+    window.govmap.zoomToXY({ x, y, level, marker: true });
+  } catch (e) {
+    // eslint-disable-next-line no-console
+    console.warn("zoomToXY failed:", e);
+  }
+}
+
+/**
+ * =========================
+ * Actions
+ * =========================
+ */
+function fmt(n) {
+  if (!Number.isFinite(n)) return "—";
+  return Number(n).toFixed(2);
+}
+
+function selectRow(r) {
+  selected.value = r;
+  if (hasXY(r)) {
+    focusXY(r.x, r.y, 9);
+    drawCirclesOnMap([r]);
+  }
+}
+
+function focusSelected() {
+  if (!selected.value || !hasXY(selected.value)) return;
+  focusXY(selected.value.x, selected.value.y, 10);
+}
+
+function drawFilteredOnMap() {
+  drawCirclesOnMap(filteredRows.value.slice(0, 500)); // לא להגזים כדי לא להכביד
+}
+
+function jumpToObjectId() {
+  const id = Number(searchObjectId.value);
+  if (!Number.isFinite(id)) return;
+
+  const r = rows.value.find((x) => x.objectId === id);
+  if (r) {
+    selectRow(r);
+    return;
+  }
+
+  // לא נמצא ב־CSV: נשמור בבחירה ריקה, ותוכל בהמשך להרחיב לתשאול שכבה ע"י API
+  selected.value = {
+    __key: `manual-${id}`,
+    objectId: id,
+    rate: null,
+    obs: null,
+    x: null,
+    y: null,
+    raw: { note: "לא נמצא ב־CSV" },
+  };
+}
+
+async function reloadAll() {
+  busy.value = true;
+  try {
+    await loadCsv();
+    if (!mapReady.value) await initMap();
+    // אחרי טעינה – צייר אוטומטית את ה־Top (אם יש נקודות)
+    setTimeout(() => drawCirclesOnMap(topRows.value.slice(0, 150)), 350);
+  } finally {
+    busy.value = false;
+  }
+}
+
+/**
+ * =========================
+ * Auto redraw on threshold changes (throttled)
+ * =========================
+ */
+let redrawTimer = null;
+watch([rateThreshold, minObservations], () => {
+  if (!mapReady.value) return;
+  if (redrawTimer) clearTimeout(redrawTimer);
+  redrawTimer = setTimeout(() => {
+    // אל תצייר ישר אלפי נקודות — נשאיר את זה ידני/Top
+    drawCirclesOnMap(topRows.value.slice(0, 150));
+  }, 350);
+});
+
+/**
+ * =========================
+ * Mount
+ * =========================
+ */
+onMounted(async () => {
+  await initMap();
+  await loadCsv();
+  // ציור ראשוני קטן אם יש X/Y
+  setTimeout(() => drawCirclesOnMap(topRows.value.slice(0, 150)), 400);
+});
+</script>
+
+<style scoped>
+/* Layout */
+.app {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: #f6f7fb;
+  color: #111;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  background: #ffffff;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+}
+
+.brand .title {
+  font-size: 18px;
+  font-weight: 800;
+  line-height: 1.1;
+}
+.brand .sub {
+  font-size: 12px;
+  opacity: 0.75;
+  margin-top: 2px;
+}
+
+.headerBtns {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.body {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 380px 1fr;
+  min-height: 0;
+}
+
+/* Panel */
+.panel {
+  background: #ffffff;
+  border-left: 1px solid rgba(0, 0, 0, 0.08);
+  padding: 10px;
+  overflow: auto;
+}
+
+.tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.tab {
+  padding: 9px 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  background: #fff;
+  cursor: pointer;
+  font-weight: 700;
+  font-size: 12px;
+}
+.tab.on {
+  background: #111;
+  color: #fff;
+  border-color: #111;
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.box {
+  background: #ffffff;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 14px;
+  padding: 10px;
+}
+
+.boxTitle {
+  font-weight: 800;
+  margin-bottom: 8px;
+}
+
+.row2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+label {
+  display: block;
+  font-size: 12px;
+  font-weight: 800;
+  margin-bottom: 6px;
+}
+
+.input {
+  width: 100%;
+  padding: 9px 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(0, 0, 0, 0.16);
+  outline: none;
+  background: #fff;
+}
+
+.inline {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.hint {
+  font-size: 12px;
+  opacity: 0.75;
+  margin-top: 6px;
+  line-height: 1.25;
+}
+
+.stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.pill {
+  background: #f6f7fb;
+  border-radius: 12px;
+  padding: 8px 10px;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+}
+.pill .k {
+  font-size: 11px;
+  opacity: 0.7;
+}
+.pill .v {
+  font-weight: 900;
+  margin-top: 2px;
+}
+
+/* List */
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 420px;
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.listItem {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  text-align: right;
+  padding: 9px 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  background: #fff;
+  cursor: pointer;
+}
+.listItem:hover {
+  background: #f6f7fb;
+}
+.listItem.active {
+  border-color: rgba(0, 0, 0, 0.35);
+  background: #f0f2ff;
+}
+
+.liTitle {
+  font-size: 12px;
+}
+.liSub {
+  font-size: 12px;
+  opacity: 0.8;
+  margin-top: 2px;
+}
+.liRight {
+  font-weight: 900;
+  opacity: 0.6;
+}
+
+.empty {
+  font-size: 13px;
+  opacity: 0.75;
+  padding: 8px 2px;
+}
+
+.kv {
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  gap: 10px;
+  padding: 6px 0;
+  border-bottom: 1px dashed rgba(0, 0, 0, 0.12);
+}
+.kv:last-child {
+  border-bottom: 0;
+}
+.kv .k {
+  font-weight: 900;
+  font-size: 12px;
+  opacity: 0.8;
+}
+.kv .v {
+  font-size: 13px;
+}
+
+.actions {
+  margin-top: 10px;
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.raw {
+  margin-top: 10px;
+}
+.raw pre {
+  background: #0b1020;
+  color: #e8eefc;
+  padding: 10px;
+  border-radius: 10px;
+  overflow: auto;
+  max-height: 220px;
+}
+
+/* Buttons */
+.btn {
+  padding: 9px 12px;
+  border-radius: 12px;
+  border: 1px solid #111;
+  background: #111;
+  color: #fff;
+  font-weight: 900;
+  cursor: pointer;
+}
+.btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.btn.ghost {
+  background: #fff;
+  color: #111;
+}
+
+/* Map */
+.mapWrap {
+  position: relative;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.mapTopBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  background: #ffffff;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+}
+
+.mapStatus {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 800;
+  font-size: 12px;
+}
+.dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #c5c7d0;
+}
+.dot.ok {
+  background: #3cb371;
+}
+.err {
+  color: #b00020;
+  font-weight: 900;
+}
+
+.mapBtns {
+  display: flex;
+  gap: 10px;
+}
+
+.map {
+  flex: 1;
+  min-height: 0;
+  background: #e9ecf5;
+}
+
+.mapHint {
+  position: absolute;
+  bottom: 10px;
+  left: 10px;
+  right: 10px;
+  max-width: 840px;
+  margin: 0 auto;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  border-radius: 12px;
+  font-size: 12px;
+  opacity: 0.9;
+}
+
+/* Observations/About text */
+.p {
+  font-size: 13px;
+  line-height: 1.35;
+  margin-bottom: 8px;
+}
+.ul {
+  margin: 0;
+  padding-right: 18px;
+}
+.ul li {
+  margin: 6px 0;
+  font-size: 13px;
+}
+
+/* Mobile */
+@media (max-width: 980px) {
+  .body {
+    grid-template-columns: 1fr;
+  }
+  .panel {
+    position: fixed;
+    top: 56px;
+    right: 0;
+    bottom: 0;
+    width: min(92vw, 420px);
+    transform: translateX(105%);
+    transition: transform 0.2s ease;
+    z-index: 5;
+    box-shadow: -20px 0 50px rgba(0, 0, 0, 0.15);
+  }
+  .panel.open {
+    transform: translateX(0%);
+  }
+}
+</style>
