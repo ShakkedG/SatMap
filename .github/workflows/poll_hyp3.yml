@@ -1,0 +1,95 @@
+name: Poll HyP3 Jobs
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "*/30 * * * *" # כל 30 דקות
+
+permissions:
+  contents: write
+
+concurrency:
+  group: repo-writer-main
+  cancel-in-progress: false
+
+jobs:
+  poll:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # חשוב ל-rebase
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps
+        run: pip install requests
+
+      - name: Poll HyP3 jobs
+        run: python pipeline/poll_hyp3.py
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          EDL_TOKEN: ${{ secrets.EDL_TOKEN }}
+          HYP3_API_URL: "https://hyp3-api.asf.alaska.edu"
+          POLL_LIMIT: "20"
+
+      - name: Export public jobs JSON
+        run: python pipeline/export_public_jobs.py
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          OUT_PATH: client/public/hyp3_jobs.json
+
+      - name: Commit JSON if changed (race-safe)
+        run: |
+          set -euo pipefail
+
+          if [[ -z "$(git status --porcelain client/public/hyp3_jobs.json)" ]]; then
+            echo "No changes"
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # שומרים את השינויים המקומיים כדי לאפשר rebase
+          git stash push -u -m "hyp3-json" -- client/public/hyp3_jobs.json
+
+          for i in 1 2 3 4 5; do
+            echo "Attempt $i/5"
+
+            git fetch origin main
+            git rebase origin/main
+
+            # מחזירים את השינויים
+            git stash pop || true
+
+            if [[ -z "$(git status --porcelain client/public/hyp3_jobs.json)" ]]; then
+              echo "No changes after rebase"
+              exit 0
+            fi
+
+            git add client/public/hyp3_jobs.json
+            git commit -m "Update hyp3_jobs public feed" || true
+
+            git fetch origin main
+            git rebase origin/main
+
+            if git push origin HEAD:main; then
+              echo "Push succeeded"
+              exit 0
+            fi
+
+            echo "Push failed, re-stashing and retrying..."
+            git reset --hard
+            git stash push -u -m "hyp3-json" -- client/public/hyp3_jobs.json
+            sleep 2
+          done
+
+          echo "Failed to push after retries"
+          exit 1

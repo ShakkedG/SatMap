@@ -1,0 +1,24 @@
+{
+  "generated_at": "2026-03-02T07:30:19.546870+00:00",
+  "counts": {
+    "succeeded": 1
+  },
+  "jobs": [
+    {
+      "job_id": "87e40aa2-2ae7-48b3-9905-4c5e4193d6f5",
+      "pair_key": "S1A_IW_SLC__1SDV_20260210T154017_20260210T154044_063159_07ED98_56E9-SLC__S1A_IW_SLC__1SDV_20260222T154017_20260222T154044_063334_07F436_E083-SLC",
+      "product_type": "INSAR_GAMMA",
+      "status": "succeeded",
+      "submitted_at": "2026-02-25T06:10:46.646896+00:00",
+      "updated_at": "2026-02-25T07:45:13.315873+00:00",
+      "download_zip": "https://d3gm2hf49xd6jj.cloudfront.net/87e40aa2-2ae7-48b3-9905-4c5e4193d6f5/S1AA_20260210T154017_20260222T154017_VVR012_INT40_G_ueF_10DA.zip",
+      "browse": null,
+      "files": [
+        {
+          "name": "S1AA_20260210T154017_20260222T154017_VVR012_INT40_G_ueF_10DA.zip",
+          "url": "https://d3gm2hf49xd6jj.cloudfront.net/87e40aa2-2ae7-48b3-9905-4c5e4193d6f5/S1AA_20260210T154017_20260222T154017_VVR012_INT40_G_ueF_10DA.zip"
+        }
+      ]
+    }
+  ]
+}

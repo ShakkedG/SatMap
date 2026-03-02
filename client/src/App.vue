@@ -1,1084 +1,1075 @@
 <template>
   <div class="app" dir="rtl">
-    <aside class="panel" :class="{ closed: !panelOpen }">
-      <div class="panelHeader">
-        <div class="brand">
-          <div class="title">SatMap</div>
-          <div class="sub">קובץ משולב: בניינים + סטטיסטיקות InSAR</div>
+    <!-- Header -->
+    <header class="header">
+      <div class="brand">
+        <div class="title">SatMap</div>
+        <div class="sub">
+          Prototype – בניינים + InSAR (CSV) + סימון חריגים על גבי GOVMAP
         </div>
-        <button class="iconBtn" @click="panelOpen = !panelOpen" title="פתח/סגור">☰</button>
       </div>
 
-      <div class="tabs">
-        <button class="tab" :class="{ on: activeTab === 'controls' }" @click="activeTab='controls'">בקרה</button>
-        <button class="tab" :class="{ on: activeTab === 'legend' }" @click="activeTab='legend'">מקרא</button>
-        <button class="tab" :class="{ on: activeTab === 'about' }" @click="activeTab='about'">הסבר</button>
+      <div class="headerBtns">
+        <button class="btn ghost" @click="panelOpen = !panelOpen">
+          {{ panelOpen ? "סגור תפריט" : "פתח תפריט" }}
+        </button>
+        <button class="btn" @click="reloadAll" :disabled="busy">
+          {{ busy ? "טוען..." : "טען מחדש" }}
+        </button>
       </div>
+    </header>
 
-      <!-- CONTROLS -->
-      <section v-show="activeTab==='controls'" class="tabPage">
-        <div class="card">
-          <div class="cardTitle">קובץ משולב</div>
-
-          <div class="row2">
-            <div class="colSpan2">
-              <label>GeoJSON (בניינים + Vel_mean + coer_mean + Vel_count)</label>
-              <input v-model.trim="paths.buildings" type="text" />
-              <div class="hint mini">
-                נטען אוטומטית בעת פתיחת העמוד. שינוי נתיב כאן יטען מחדש תוך שנייה.
-              </div>
-            </div>
-          </div>
-
-          <div class="rowBtns">
-            <button class="btn ghost" @click="fitToLayer" :disabled="!hasBounds">התמקד בשכבה</button>
-            <button class="btn" @click="recolorAll" :disabled="!ready || loading">רענן צבעים</button>
-          </div>
-
-          <div class="hint">
-            הקובץ צריך להיות בתוך <b>client/public/data</b> ואז הנתיב יהיה:
-            <code>{{ baseUrl }}data/buildings_joined.geojson</code>
-          </div>
+    <div class="body">
+      <!-- Side Panel -->
+      <aside class="panel" :class="{ open: panelOpen }">
+        <div class="tabs">
+          <button class="tab" :class="{ on: mode === 'subsidence' }" @click="mode = 'subsidence'">
+            בניינים שוקעים
+          </button>
+          <button class="tab" :class="{ on: mode === 'observations' }" @click="mode = 'observations'">
+            תצפיות / נתונים
+          </button>
+          <button class="tab" :class="{ on: mode === 'about' }" @click="mode = 'about'">
+            איך זה עובד
+          </button>
         </div>
 
-        <div class="card">
-          <div class="cardTitle">ספים לחישוב סטטוס</div>
-
-          <div class="row2">
-            <div>
-              <label>סף “שוקע/חשוד” v (mm/yr)</label>
-              <input v-model.number="params.thrVel" type="number" step="0.5" />
-              <div class="hint mini">יותר שלילי = יותר שקיעה</div>
-            </div>
-            <div>
-              <label>איכות מינימלית (coherence)</label>
-              <input v-model.number="params.thrCoh" type="number" step="0.05" min="0" max="1" />
-              <div class="hint mini">0–1. מתחת לסף = איכות נמוכה</div>
-            </div>
-          </div>
-
-          <div class="row2">
-            <div>
-              <label>מינימום נקודות לבניין (Vel_count)</label>
-              <input v-model.number="params.minPts" type="number" step="1" min="1" />
-              <div class="hint mini">מעט נקודות = פחות אמין</div>
-            </div>
-
-            <label class="check">
-              <input v-model="ui.filterSubs" type="checkbox" />
-              הצג רק “שוקע/חשוד”
-            </label>
-          </div>
-        </div>
-
-        <div class="card">
-          <div class="cardTitle">מידע על בניין</div>
-
-          <div v-if="!selected" class="emptyState">
-            <div class="emptyIcon">⌖</div>
-            <div class="emptyText">
-              <b>רחף</b> מעל בניין כדי לראות טולטיפ.<br />
-              <b>לחץ</b> על בניין כדי להצמיד כאן נתונים.
-            </div>
-          </div>
-
-          <div v-else class="infoCard">
-            <div class="infoTop">
-              <div class="idBlock">
-                <div class="idLabel">מזהה</div>
-                <div class="idValue">{{ selected.id }}</div>
-              </div>
-
-              <div class="badges">
-                <span class="badge" :class="'b-' + selected.st.status">
-                  {{ statusLabel(selected.st.status) }}
-                </span>
-                <span v-if="qualityTag" class="badge ghost">
-                  {{ qualityTag }}
-                </span>
-              </div>
-            </div>
-
-            <div class="kvGrid">
-              <div class="kv">
-                <div class="k">Vel_mean</div>
-                <div class="v">{{ fmtVel(selected.st.velMean) }}</div>
-                <div class="u">mm/yr</div>
-              </div>
-
-              <div class="kv">
-                <div class="k">coer_mean</div>
-                <div class="v">{{ fmtCoh(selected.st.cohMean) }}</div>
-                <div class="u">0–1</div>
-              </div>
-
-              <div class="kv">
-                <div class="k">Vel_count</div>
-                <div class="v">{{ fmtCount(selected.st.count) }}</div>
-                <div class="u">נק׳</div>
-              </div>
-
-              <div class="kv">
-                <div class="k">סף שקיעה</div>
-                <div class="v">{{ params.thrVel }}</div>
-                <div class="u">mm/yr</div>
-              </div>
-            </div>
-
-            <div class="meterWrap" v-if="selected.st.cohMean != null">
-              <div class="meterTop">
-                <div class="meterLabel">איכות (coherence)</div>
-                <div class="meterValue" :class="{ bad: !cohOk }">
-                  {{ fmtCoh(selected.st.cohMean) }}
-                  <span class="miniNote">({{ cohOk ? "עבר סף" : "מתחת לסף" }})</span>
+        <!-- ================= SUBSIDENCE ================= -->
+        <section v-if="mode === 'subsidence'" class="section">
+          <div class="box">
+            <div class="row2">
+              <div>
+                <label>סף “שוקע/חשוד” v (mm/yr)</label>
+                <input class="input" type="number" v-model.number="rateThreshold" step="0.5" />
+                <div class="hint">
+                  ברירת מחדל: ‎-2 (כל ערך קטן/שווה לסף נחשב “שוקע”).
                 </div>
               </div>
-              <div class="meter">
-                <div class="meterFill" :style="{ width: Math.max(0, Math.min(1, selected.st.cohMean)) * 100 + '%' }"></div>
-                <div class="meterThr" :style="{ left: Math.max(0, Math.min(1, params.thrCoh)) * 100 + '%' }" title="סף"></div>
+              <div>
+                <label>מינימום תצפיות (אופציונלי)</label>
+                <input class="input" type="number" v-model.number="minObservations" step="1" min="0" />
+                <div class="hint">
+                  אם בעמודה ב־CSV יש num_obs / n / count – נסנן גם לפיה.
+                </div>
               </div>
             </div>
 
-            <div class="checks">
-              <div class="checkRow" :class="{ ok: countOk, bad: !countOk }">
-                <span class="dot"></span>
-                מינימום נקודות: {{ selected.st.count }} / {{ params.minPts }}
+            <div class="row2">
+              <div>
+                <label>חפש לפי OBJECTID</label>
+                <div class="inline">
+                  <input class="input" type="number" v-model.number="searchObjectId" placeholder="לדוגמה: 12345" />
+                  <button class="btn" @click="jumpToObjectId" :disabled="!searchObjectId || !mapReady">
+                    קפוץ
+                  </button>
+                </div>
+                <div class="hint">
+                  אם יש ל־CSV נקודת X/Y – נבצע התמקדות לפי הנקודה. אחרת רק נבחר רשומה.
+                </div>
               </div>
-              <div class="checkRow" :class="{ ok: cohOk, bad: !cohOk }">
-                <span class="dot"></span>
-                איכות מינימלית: {{ fmtCoh(selected.st.cohMean) }} / {{ params.thrCoh }}
+
+              <div>
+                <label>שכבת בניינים (אופציונלי)</label>
+                <input class="input" type="text" v-model="buildingsLayerName" placeholder="למשל: BUILDINGS_LAYER_NAME" />
+                <div class="hint">
+                  אם תמלא כאן “שם שכבה” תקין של GOVMAP, נשתמש בו גם לתשאול בלחיצה (identify/getLayerData).
+                </div>
               </div>
             </div>
 
-            <div class="miniExplain">
-              <span class="miniTag">low_quality</span> = coherence נמוך או מעט נקודות<br />
-              <span class="miniTag">no_data</span> = חסרים נתונים לבניין בקובץ
-            </div>
-
-            <div class="rowBtns" style="margin-top:10px;">
-              <button class="btn ghost" @click="clearSelection">נקה בחירה</button>
-            </div>
-          </div>
-        </div>
-
-        <div class="card">
-          <div class="cardTitle">מצב</div>
-          <div class="statusBox">
-            <div class="statusLine">
-              <span class="statusDot" :class="{ on: ready }"></span>
-              <span>{{ status }}</span>
-            </div>
-            <div class="hint mini" v-if="lastLoadedUrl">
-              נטען מ: <code>{{ lastLoadedUrl }}</code>
+            <div class="stats">
+              <div class="pill">
+                <div class="k">CSV</div>
+                <div class="v">{{ csvStatus }}</div>
+              </div>
+              <div class="pill">
+                <div class="k">סך רשומות</div>
+                <div class="v">{{ rows.length }}</div>
+              </div>
+              <div class="pill">
+                <div class="k">שוקעים</div>
+                <div class="v">{{ filteredRows.length }}</div>
+              </div>
             </div>
           </div>
-        </div>
-      </section>
 
-      <!-- LEGEND -->
-      <section v-show="activeTab==='legend'" class="tabPage">
-        <div class="card">
-          <div class="cardTitle">מקרא צבעים</div>
+          <div class="box">
+            <div class="boxTitle">רשימת בניינים שוקעים (Top 200)</div>
 
-          <div class="legend">
-            <div class="legRow"><span class="sw s-subs"></span> שוקע (v &lt; סף)</div>
-            <div class="legRow"><span class="sw s-sus"></span> חשוד (קרוב לסף)</div>
-            <div class="legRow"><span class="sw s-stable"></span> יציב</div>
-            <div class="legRow"><span class="sw s-lowq"></span> איכות נמוכה</div>
-            <div class="legRow"><span class="sw s-nodata"></span> אין נתונים</div>
+            <div v-if="filteredRows.length === 0" class="empty">
+              אין נתונים שעוברים את הסף. בדוק שה־CSV נטען ושיש עמודת מהירות (v / velocity / rate).
+            </div>
+
+            <div v-else class="list">
+              <button
+                v-for="r in topRows"
+                :key="r.__key"
+                class="listItem"
+                :class="{ active: selected?.__key === r.__key }"
+                @click="selectRow(r)"
+              >
+                <div class="liMain">
+                  <div class="liTitle">
+                    OBJECTID: <b>{{ r.objectId ?? "—" }}</b>
+                  </div>
+                  <div class="liSub">
+                    v: <b>{{ fmt(r.rate) }}</b> mm/yr
+                    <span v-if="r.obs != null"> · n={{ r.obs }}</span>
+                    <span v-if="r.x != null && r.y != null"> · X/Y ✓</span>
+                  </div>
+                </div>
+                <div class="liRight">→</div>
+              </button>
+            </div>
           </div>
-        </div>
-      </section>
 
-      <!-- ABOUT -->
-      <section v-show="activeTab==='about'" class="tabPage">
-        <div class="card">
-          <div class="cardTitle">איך מחושב הסטטוס</div>
-          <div class="p">
-            משתמשים בשדות שכבר קיימים לכל בניין בקובץ המשולב:
+          <div class="box" v-if="selected">
+            <div class="boxTitle">פרטי בניין נבחר</div>
+            <div class="kv">
+              <div class="k">OBJECTID</div>
+              <div class="v">{{ selected.objectId ?? "—" }}</div>
+            </div>
+            <div class="kv">
+              <div class="k">v (mm/yr)</div>
+              <div class="v">{{ fmt(selected.rate) }}</div>
+            </div>
+            <div class="kv">
+              <div class="k">תצפיות</div>
+              <div class="v">{{ selected.obs ?? "—" }}</div>
+            </div>
+            <div class="kv">
+              <div class="k">X / Y</div>
+              <div class="v">
+                <span v-if="selected.x != null && selected.y != null">{{ selected.x }}, {{ selected.y }}</span>
+                <span v-else>—</span>
+              </div>
+            </div>
+
+            <div class="actions">
+              <button class="btn" @click="focusSelected" :disabled="!mapReady || !hasXY(selected)">
+                התמקדות במפה
+              </button>
+              <button class="btn ghost" @click="clearOverlays" :disabled="!mapReady">
+                נקה סימונים
+              </button>
+            </div>
+
+            <details class="raw">
+              <summary>Raw row</summary>
+              <pre>{{ selected.raw }}</pre>
+            </details>
+          </div>
+        </section>
+
+        <!-- ================= OBSERVATIONS ================= -->
+        <section v-else-if="mode === 'observations'" class="section">
+          <div class="box">
+            <div class="boxTitle">קבצים ציבוריים</div>
+            <div class="hint">
+              הפרונט טוען את ה־CSV מתוך <code>client/public/insar_buildings.csv</code>
+              (או מהשורש בפריסה של Vite).
+            </div>
+
+            <div class="kv">
+              <div class="k">CSV URL</div>
+              <div class="v">
+                <code>{{ csvUrl }}</code>
+              </div>
+            </div>
+
+            <div class="kv">
+              <div class="k">סטטוס</div>
+              <div class="v">{{ csvStatus }}</div>
+            </div>
+
+            <div class="actions">
+              <button class="btn" @click="loadCsv" :disabled="busy">טען CSV</button>
+              <button class="btn ghost" @click="drawFilteredOnMap" :disabled="!mapReady || filteredRows.length === 0">
+                צייר את כל השוקעים על המפה
+              </button>
+            </div>
+          </div>
+
+          <div class="box">
+            <div class="boxTitle">הערות פורמט CSV (מה שהאפליקציה יודעת לזהות)</div>
             <ul class="ul">
-              <li><b>Vel_mean</b> – ממוצע מהירות (mm/yr)</li>
-              <li><b>coer_mean</b> – ממוצע coherence (0–1)</li>
-              <li><b>Vel_count</b> – כמות נקודות שהשתתפו</li>
-            </ul>
-
-            סטטוס:
-            <ul class="ul">
-              <li><b>no_data</b>: חסרים נתונים או 0 נקודות</li>
-              <li><b>low_quality</b>: coher_mean מתחת לסף או Vel_count קטן מהמינימום</li>
-              <li><b>subsiding</b>: איכות תקינה ו־Vel_mean קטן (שלילי יותר) מהסף</li>
-              <li><b>suspect</b>: איכות תקינה ו־Vel_mean קרוב לסף (±0.5)</li>
-              <li><b>stable</b>: איכות תקינה ו־Vel_mean לא עובר את הסף</li>
+              <li>
+                OBJECTID: אחת מהעמודות:
+                <code>OBJECTID</code>, <code>objectid</code>, <code>id</code>, <code>building_id</code>
+              </li>
+              <li>
+                rate(mm/yr): אחת מהעמודות:
+                <code>v</code>, <code>velocity</code>, <code>rate</code>, <code>rate_mm_yr</code>, <code>mm_yr</code>
+              </li>
+              <li>
+                תצפיות (אופציונלי):
+                <code>num_obs</code>, <code>n</code>, <code>count</code>
+              </li>
+              <li>
+                קואורדינטות (אם קיימות): <code>x</code>/<code>y</code> או <code>X</code>/<code>Y</code>
+                (עדיף ב־ITM כדי שיתאים ל־GOVMAP).
+              </li>
             </ul>
           </div>
+        </section>
+
+        <!-- ================= ABOUT ================= -->
+        <section v-else class="section">
+          <div class="box">
+            <div class="boxTitle">מה קורה פה</div>
+            <div class="p">
+              1) נטענת מפה של GOVMAP בעזרת <code>govmap.api.js</code> ונוצר Map בתוך ה־DIV.
+            </div>
+            <div class="p">
+              2) נטען <code>insar_buildings.csv</code> ומחולצים מזהים + מהירות שקיעה (mm/yr) + (אופציונלי) X/Y.
+            </div>
+            <div class="p">
+              3) כשבוחרים בניין או כשלוחצים “צייר שוקעים”, האפליקציה מציירת סימונים על המפה באמצעות
+              <code>govmap.displayGeometries</code> (כאן כעיגולים קטנים). :contentReference[oaicite:0]{index=0}
+            </div>
+            <div class="p">
+              אם אתה רוצה גם “לשאול” שכבת בניינים בלחיצה (ולקבל פרטי ישות), תמלא שם שכבה תקין ב־“שכבת בניינים”
+              ותוכל להרחיב את ה־onClick כדי לקרוא ל־<code>identifyByXYAndLayer</code>/<code>getLayerData</code>. :contentReference[oaicite:1]{index=1}
+            </div>
+          </div>
+
+          <div class="box">
+            <div class="boxTitle">טוקן GOVMAP</div>
+            <div class="p">
+              האפליקציה מצפה ל־<code>VITE_GOVMAP_TOKEN</code> (דרך Vite env). את המפה יוצרים עם
+              <code>govmap.createMap</code>. :contentReference[oaicite:2]{index=2}
+            </div>
+          </div>
+        </section>
+      </aside>
+
+      <!-- Map -->
+      <main class="mapWrap">
+        <div class="mapTopBar">
+          <div class="mapStatus">
+            <span class="dot" :class="{ ok: mapReady }"></span>
+            <span>{{ mapReady ? "מפה מוכנה" : "טוען GOVMAP..." }}</span>
+            <span v-if="mapError" class="err"> · {{ mapError }}</span>
+          </div>
+
+          <div class="mapBtns">
+            <button class="btn ghost" @click="drawFilteredOnMap" :disabled="!mapReady || filteredRows.length === 0">
+              צייר שוקעים
+            </button>
+            <button class="btn ghost" @click="clearOverlays" :disabled="!mapReady">
+              נקה
+            </button>
+          </div>
         </div>
-      </section>
-    </aside>
 
-    <main class="mapWrap">
-      <div id="map"></div>
+        <div id="govmap" class="map"></div>
 
-      <div class="topRight">
-        <div class="pill">רחף: טולטיפ (ימינה מהעכבר) • קליק: פירוט</div>
-      </div>
-
-      <!-- Hover tooltip -->
-      <div
-        v-show="hover.show"
-        ref="hoverRef"
-        class="hoverTip"
-        :style="hoverStyle"
-        v-html="hover.html"
-      />
-
-      <div v-show="loading" class="loader">
-        <div class="spin"></div>
-        <div class="txt">{{ loadingText }}</div>
-      </div>
-    </main>
+        <div class="mapHint">
+          טיפ: GOVMAP עובד עם token שמוגבל לדומיין. אם המפה לא נטענת — בדוק שהטוקן מאושר ל־GitHub Pages.
+        </div>
+      </main>
+    </div>
   </div>
 </template>
 
 <script setup>
-import { computed, onMounted, onBeforeUnmount, reactive, ref, watch } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 
-const baseUrl = import.meta.env.BASE_URL || "/";
+/**
+ * =========================
+ * Config (Vite env)
+ * =========================
+ */
+const GOVMAP_TOKEN = import.meta.env.VITE_GOVMAP_TOKEN || "";
+const GOVMAP_LAYERS = (import.meta.env.VITE_GOVMAP_LAYERS || "")
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
 
-const paths = reactive({
-  // חשוב: בלי סלש בסוף
-  buildings: baseUrl + "data/buildings_joined.geojson",
-});
+const csvUrl = new URL("insar_buildings.csv", import.meta.env.BASE_URL).toString();
 
-const params = reactive({
-  thrVel: -2,
-  thrCoh: 0.35,
-  minPts: 8,
-});
-
-const ui = reactive({
-  filterSubs: false,
-});
-
+/**
+ * =========================
+ * UI State
+ * =========================
+ */
 const panelOpen = ref(true);
-const activeTab = ref("controls");
+const mode = ref("subsidence"); // subsidence | observations | about
 
-const status = ref("טוען אוטומטית…");
-const loading = ref(false);
-const loadingText = ref("טוען…");
-const lastLoadedUrl = ref("");
+const busy = ref(false);
+const mapReady = ref(false);
+const mapError = ref("");
 
-const hover = reactive({ show: false, x: 0, y: 0, html: "", _flip: false, _w: 260 });
-const hoverRef = ref(null);
+const csvStatus = ref("לא נטען עדיין");
+const rows = ref([]);
+const selected = ref(null);
 
-const selected = ref(null); // { id, st, feature }
-const ready = ref(false);
-const hasBounds = ref(false);
+const rateThreshold = ref(-2);
+const minObservations = ref(0);
+const searchObjectId = ref(null);
+const buildingsLayerName = ref(import.meta.env.VITE_BUILDINGS_LAYER_NAME || "");
 
-let map = null;
-let buildingsLayer = null;
-let buildingsFC = null;
+/**
+ * =========================
+ * Derived
+ * =========================
+ */
+const filteredRows = computed(() => {
+  const thr = Number(rateThreshold.value);
+  const minObs = Number(minObservations.value || 0);
 
-const L = () => window.L;
+  return rows.value
+    .filter((r) => Number.isFinite(r.rate))
+    .filter((r) => r.rate <= thr)
+    .filter((r) => (minObs > 0 ? (r.obs ?? 0) >= minObs : true))
+    .sort((a, b) => a.rate - b.rate);
+});
 
-function setLoading(on, text = "טוען…") {
-  loading.value = on;
-  loadingText.value = text;
-}
+const topRows = computed(() => filteredRows.value.slice(0, 200));
 
-function setStatus(msg) {
-  status.value = msg;
-}
-
-function sanitizeUrl(u) {
-  return String(u || "").trim().replace(/\/+$/, ""); // מוריד / בסוף (זה גורם ל-404)
-}
-
-function isFiniteNum(v) {
-  return typeof v === "number" && Number.isFinite(v);
-}
-
-function normFC(any) {
-  if (!any) throw new Error("GeoJSON ריק");
-  if (any.type === "FeatureCollection") return any;
-  if (any.type === "Feature") return { type: "FeatureCollection", features: [any] };
-  throw new Error("פורמט GeoJSON לא נתמך");
-}
-
-function buildingId(f) {
-  const p = f?.properties || {};
-  return (
-    p.id ?? p.ID ?? p.objectid ?? p.OBJECTID ?? p.fid ?? p.FID ?? p.Name ?? p.name ?? "building"
-  );
-}
-
-/* מיפוי שמות שדות בצורה גמישה (case-insensitive + וריאנטים נפוצים) */
-function getNum(props, keys) {
-  if (!props) return null;
-
-  for (const k of keys) {
-    if (props[k] != null) {
-      const v = Number(props[k]);
-      if (Number.isFinite(v)) return v;
+/**
+ * =========================
+ * GovMap Script Loader
+ * =========================
+ */
+function loadScriptOnce(src) {
+  return new Promise((resolve, reject) => {
+    const existing = document.querySelector(`script[data-src="${src}"]`);
+    if (existing) {
+      // Already appended; wait until govmap exists.
+      const t = setInterval(() => {
+        if (window.govmap) {
+          clearInterval(t);
+          resolve();
+        }
+      }, 50);
+      setTimeout(() => {
+        clearInterval(t);
+        if (window.govmap) resolve();
+        else reject(new Error("govmap.api.js נטען אבל window.govmap לא זמין"));
+      }, 12000);
+      return;
     }
+
+    const script = document.createElement("script");
+    script.src = src;
+    script.defer = true;
+    script.dataset.src = src;
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error("נכשל לטעון govmap.api.js"));
+    document.head.appendChild(script);
+  });
+}
+
+async function ensureGovMapLoaded() {
+  if (window.govmap) return;
+  await loadScriptOnce("https://www.govmap.gov.il/govmap/api/govmap.api.js");
+
+  // Wait until the API attaches to window
+  const start = Date.now();
+  while (!window.govmap && Date.now() - start < 12000) {
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  if (!window.govmap) throw new Error("window.govmap לא זמין אחרי טעינת הסקריפט");
+}
+
+/**
+ * =========================
+ * Map init
+ * =========================
+ */
+async function initMap() {
+  mapReady.value = false;
+  mapError.value = "";
+
+  if (!GOVMAP_TOKEN) {
+    mapError.value = "חסר VITE_GOVMAP_TOKEN";
+    return;
   }
 
-  const lower = Object.keys(props).reduce((acc, k) => (acc[k.toLowerCase()] = k, acc), {});
-  for (const k of keys) {
-    const real = lower[String(k).toLowerCase()];
-    if (real && props[real] != null) {
-      const v = Number(props[real]);
-      if (Number.isFinite(v)) return v;
+  try {
+    await ensureGovMapLoaded();
+
+    // Create map
+    window.govmap.createMap("govmap", {
+      token: GOVMAP_TOKEN,
+      layers: GOVMAP_LAYERS,
+      showXY: true,
+      identifyOnClick: true,
+      isEmbeddedToggle: false,
+      background: "1",
+      layersMode: 1,
+      zoomButtons: true,
+      onLoad: () => {
+        mapReady.value = true;
+      },
+      onError: (e) => {
+        mapError.value = (e && (e.message || e.toString())) || "שגיאה לא ידועה בטעינת המפה";
+      },
+      onClick: (e) => {
+        // אפשר להרחיב: אם buildingsLayerName מוגדר, לקרוא identifyByXYAndLayer / getLayerData
+        // ולפתוח חלון נתונים משלך.
+        // כרגע נשמור את הקליק כדי שתוכל לראות בקונסול.
+        // eslint-disable-next-line no-console
+        console.log("GovMap onClick:", e);
+      },
+    });
+
+    // אם onLoad לא מגיע (לפעמים), נעשה fallback:
+    setTimeout(() => {
+      if (!mapReady.value && window.govmap) mapReady.value = true;
+    }, 2500);
+  } catch (err) {
+    mapError.value = err?.message || String(err);
+  }
+}
+
+/**
+ * =========================
+ * CSV parsing
+ * =========================
+ */
+function splitCsvLine(line) {
+  // Simple CSV splitter supporting quotes
+  const out = [];
+  let cur = "";
+  let inQ = false;
+
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+
+    if (ch === '"') {
+      if (inQ && line[i + 1] === '"') {
+        cur += '"';
+        i++;
+      } else {
+        inQ = !inQ;
+      }
+      continue;
     }
+
+    if (ch === "," && !inQ) {
+      out.push(cur);
+      cur = "";
+      continue;
+    }
+
+    cur += ch;
+  }
+  out.push(cur);
+  return out.map((s) => s.trim());
+}
+
+function pickHeader(headers, candidates) {
+  const lower = headers.map((h) => String(h).trim());
+  for (const c of candidates) {
+    const idx = lower.findIndex((h) => h.toLowerCase() === c.toLowerCase());
+    if (idx !== -1) return { name: headers[idx], idx };
+  }
+  // fallback: contains
+  for (const c of candidates) {
+    const idx = lower.findIndex((h) => h.toLowerCase().includes(c.toLowerCase()));
+    if (idx !== -1) return { name: headers[idx], idx };
   }
   return null;
 }
 
-function getInt(props, keys) {
-  const v = getNum(props, keys);
+function toNum(v) {
   if (v == null) return null;
-  const n = Math.round(v);
+  const s = String(v).trim();
+  if (!s) return null;
+  const n = Number(s.replaceAll(" ", ""));
   return Number.isFinite(n) ? n : null;
 }
 
-function deriveStatsFromProps(feature) {
-  const p = feature?.properties || {};
+function hasXY(r) {
+  return r && Number.isFinite(r.x) && Number.isFinite(r.y);
+}
 
-  const velMean = getNum(p, ["Vel_mean", "vel_mean", "VEL_MEAN", "velocity_mean", "v_mean", "velMean"]);
-  const cohMean = getNum(p, ["coer_mean", "Coer_mean", "COER_MEAN", "coh_mean", "coherence_mean", "cohMean"]);
-  const count = getInt(p, ["Vel_count", "vel_count", "VEL_COUNT", "count", "n_points", "n", "VelCount"]);
+async function loadCsv() {
+  busy.value = true;
+  csvStatus.value = "טוען...";
+  try {
+    const res = await fetch(csvUrl, { cache: "no-store" });
+    if (!res.ok) throw new Error(`CSV HTTP ${res.status}`);
+    const text = await res.text();
 
-  if (!isFiniteNum(velMean) || !Number.isFinite(count) || count <= 0) {
-    return { status: "no_data", velMean: velMean ?? null, cohMean: cohMean ?? null, count: count ?? 0 };
+    const lines = text
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .filter((l) => l.length > 0);
+
+    if (lines.length < 2) {
+      rows.value = [];
+      csvStatus.value = "CSV ריק / לא תקין";
+      return;
+    }
+
+    const headers = splitCsvLine(lines[0]);
+
+    const hObj = pickHeader(headers, ["OBJECTID", "objectid", "id", "building_id", "object_id"]);
+    const hRate = pickHeader(headers, ["v", "velocity", "rate", "rate_mm_yr", "mm_yr", "subsidence"]);
+    const hObs = pickHeader(headers, ["num_obs", "n", "count", "observations", "numobs"]);
+    const hX = pickHeader(headers, ["x", "X", "easting", "east"]);
+    const hY = pickHeader(headers, ["y", "Y", "northing", "north"]);
+
+    const parsed = [];
+    for (let i = 1; i < lines.length; i++) {
+      const cols = splitCsvLine(lines[i]);
+      const rawObj = {};
+      for (let j = 0; j < headers.length; j++) rawObj[headers[j]] = cols[j];
+
+      const objectId = hObj ? toNum(cols[hObj.idx]) : null;
+      const rate = hRate ? toNum(cols[hRate.idx]) : null;
+      const obs = hObs ? toNum(cols[hObs.idx]) : null;
+      const x = hX ? toNum(cols[hX.idx]) : null;
+      const y = hY ? toNum(cols[hY.idx]) : null;
+
+      parsed.push({
+        __key: `${objectId ?? "na"}-${i}`,
+        objectId,
+        rate,
+        obs,
+        x,
+        y,
+        raw: rawObj,
+      });
+    }
+
+    rows.value = parsed;
+    csvStatus.value = `נטען (${parsed.length} שורות)`;
+  } catch (err) {
+    rows.value = [];
+    csvStatus.value = `שגיאה: ${err?.message || String(err)}`;
+  } finally {
+    busy.value = false;
   }
-
-  const cohOkLocal = (cohMean == null) ? true : (cohMean >= Number(params.thrCoh));
-  const cntOkLocal = count >= Number(params.minPts);
-
-  let status = "stable";
-  if (!cohOkLocal || !cntOkLocal) status = "low_quality";
-  else if (velMean < Number(params.thrVel)) status = "subsiding";
-  else if (Math.abs(velMean - Number(params.thrVel)) <= 0.5) status = "suspect";
-  else status = "stable";
-
-  return { status, velMean, cohMean: cohMean ?? null, count };
 }
 
-function statusLabel(s) {
-  const m = {
-    subsiding: "שוקע",
-    suspect: "חשוד",
-    stable: "יציב",
-    low_quality: "איכות נמוכה",
-    no_data: "אין נתונים",
-  };
-  return m[s] || s;
-}
-
-function getCss(varName) {
-  return getComputedStyle(document.documentElement).getPropertyValue(varName).trim();
-}
-
-function styleByStatus(statusName) {
-  const colors = {
-    subsiding: getCss("--c-subs"),
-    suspect: getCss("--c-sus"),
-    stable: getCss("--c-stable"),
-    low_quality: getCss("--c-lowq"),
-    no_data: getCss("--c-nodata"),
-  };
-  const c = colors[statusName] || colors.no_data;
-
-  return {
-    weight: 2,
-    opacity: 0.95,
-    fillOpacity: 0.25,
-    color: c,
-    fillColor: c,
-  };
-}
-
-function shouldShowByFilter(st) {
-  if (!ui.filterSubs) return true;
-  return st.status === "subsiding" || st.status === "suspect";
-}
-
-function applyLayerStyle(layer, st) {
-  const base = styleByStatus(st.status);
-  if (ui.filterSubs) {
-    const show = shouldShowByFilter(st);
-    layer.setStyle({
-      ...base,
-      fillOpacity: show ? 0.35 : 0.0,
-      opacity: show ? 0.95 : 0.0,
+/**
+ * =========================
+ * Map overlays (GovMap)
+ * =========================
+ */
+async function clearOverlays() {
+  if (!mapReady.value || !window.govmap) return;
+  try {
+    // ננקה את כל הגאומטריות שציירנו לפי שם prefix (פשוט יותר: נצייר תמיד עם clearExisting)
+    // כאן נשאיר את זה פשוט:
+    await window.govmap.displayGeometries({
+      circleGeometries: [],
+      names: [],
+      geometryType: window.govmap.geometryType.CIRCLE,
+      defaultSymbol: { outlineColor: [255, 0, 0, 1], outlineWidth: 1, fillColor: [255, 0, 0, 0.25] },
+      symbols: [],
+      clearExisting: true,
+      data: { tooltips: [], headers: [], bubbles: [], bubbleUrl: "" },
     });
-  } else {
-    layer.setStyle(base);
+  } catch (e) {
+    // eslint-disable-next-line no-console
+    console.warn("clearOverlays failed:", e);
   }
 }
 
-/* ---------- Tooltip positioning: right of cursor + auto-flip ---------- */
-const hoverStyle = computed(() => ({
-  left: hover.x + "px",
-  top: hover.y + "px",
-  transform: hover._flip ? `translate(${-hover._w - 14}px, -12px)` : `translate(14px, -12px)`,
-}));
+async function drawCirclesOnMap(items) {
+  if (!mapReady.value || !window.govmap) return;
+  const usable = items.filter(hasXY);
+  if (usable.length === 0) return;
 
-function onMouseMove(e) {
-  hover.x = e.clientX;
-  hover.y = e.clientY;
-  if (hover.show) requestAnimationFrame(fixTipFlip);
-}
-
-function fixTipFlip() {
-  const el = hoverRef.value;
-  if (!el) return;
-  const rect = el.getBoundingClientRect();
-  hover._w = rect.width || 260;
-  hover._flip = rect.right > window.innerWidth - 10;
-}
-
-function fmtVel(v) {
-  if (v == null || !Number.isFinite(v)) return "—";
-  return Number(v).toFixed(2);
-}
-function fmtCoh(v) {
-  if (v == null || !Number.isFinite(v)) return "—";
-  return Number(v).toFixed(2);
-}
-function fmtCount(v) {
-  if (v == null || !Number.isFinite(v)) return "—";
-  return String(v);
-}
-
-function tipHtml(st) {
-  const velTxt = st.velMean == null ? "—" : st.velMean.toFixed(2);
-  const cohTxt = st.cohMean == null ? "—" : st.cohMean.toFixed(2);
-
-  const badgeCls = "tipBadge t-" + st.status;
-  return `
-    <div class="tipRow">
-      <span class="${badgeCls}">${statusLabel(st.status)}</span>
-      <span class="tipK">Vel</span><span class="tipV">${velTxt}</span>
-      <span class="tipK">coh</span><span class="tipV">${cohTxt}</span>
-      <span class="tipK">n</span><span class="tipV">${st.count}</span>
-    </div>
-  `;
-}
-
-/* ---------- Selection helpers ---------- */
-const cohOk = computed(() => {
-  const st = selected.value?.st;
-  if (!st) return true;
-  if (st.cohMean == null) return true; // אם אין - לא נפסול
-  return st.cohMean >= Number(params.thrCoh);
-});
-const countOk = computed(() => {
-  const st = selected.value?.st;
-  if (!st) return true;
-  return (st.count ?? 0) >= Number(params.minPts);
-});
-const qualityTag = computed(() => {
-  const st = selected.value?.st;
-  if (!st) return "";
-  if (st.status === "no_data") return "חסר נתונים";
-  if (st.status === "low_quality") return "איכות/כמות לא מספיקה";
-  if (!cohOk.value) return "coherence נמוך";
-  if (!countOk.value) return "מעט נקודות";
-  return "איכות תקינה";
-});
-
-function clearSelection() {
-  selected.value = null;
-}
-
-/* ---------- Load & draw (AUTO) ---------- */
-async function loadBuildings() {
-  const url = sanitizeUrl(paths.buildings);
+  // עיגולים קטנים סביב נקודות (X/Y)
+  const circles = usable.map((r) => ({ x: r.x, y: r.y, radius: 10 }));
+  const names = usable.map((r) => `b_${r.objectId ?? r.__key}`);
+  const tooltips = usable.map((r) => `OBJECTID ${r.objectId ?? "—"} | v=${fmt(r.rate)} mm/yr`);
+  const headers = usable.map((r) => `בניין ${r.objectId ?? "—"}`);
 
   try {
-    setLoading(true, "טוען GeoJSON…");
-    setStatus("טוען שכבה אוטומטית…");
-    ready.value = false;
-    lastLoadedUrl.value = "";
-
-    const r = await fetch(url, { cache: "no-store" });
-    if (!r.ok) throw new Error(`לא הצלחתי לטעון: ${url} (HTTP ${r.status})`);
-
-    const js = await r.json();
-    buildingsFC = normFC(js);
-
-    drawBuildings(buildingsFC);
-    ready.value = true;
-    lastLoadedUrl.value = url;
-    setStatus(`נטען: ${buildingsFC.features.length} בניינים`);
+    await window.govmap.displayGeometries({
+      circleGeometries: circles,
+      names,
+      geometryType: window.govmap.geometryType.CIRCLE,
+      defaultSymbol: {
+        outlineColor: [255, 0, 0, 1],
+        outlineWidth: 2,
+        fillColor: [255, 0, 0, 0.25],
+      },
+      symbols: [],
+      clearExisting: true,
+      showBubble: true,
+      data: {
+        tooltips,
+        headers,
+        bubbles: new Array(usable.length).fill(""),
+        bubbleUrl: "",
+        bubbleHTML:
+          "<div style='padding:10px;font-family:Arial;direction:rtl'><div style='font-weight:700;margin-bottom:6px'>{0}</div><div>v (mm/yr): <b>{1}</b></div><div>תצפיות: <b>{2}</b></div><div style='margin-top:6px;font-size:12px;opacity:.75'>X/Y: {3}, {4}</div></div>",
+        bubbleHTMLParameters: usable.map((r) => [
+          `OBJECTID ${r.objectId ?? "—"}`,
+          fmt(r.rate),
+          r.obs ?? "—",
+          r.x ?? "—",
+          r.y ?? "—",
+        ]),
+      },
+    });
   } catch (e) {
-    console.error(e);
-    setStatus("שגיאה בטעינה: " + (e?.message || e));
+    // eslint-disable-next-line no-console
+    console.warn("drawCirclesOnMap failed:", e);
+  }
+}
+
+function focusXY(x, y, level = 9) {
+  if (!mapReady.value || !window.govmap) return;
+  try {
+    window.govmap.zoomToXY({ x, y, level, marker: true });
+  } catch (e) {
+    // eslint-disable-next-line no-console
+    console.warn("zoomToXY failed:", e);
+  }
+}
+
+/**
+ * =========================
+ * Actions
+ * =========================
+ */
+function fmt(n) {
+  if (!Number.isFinite(n)) return "—";
+  return Number(n).toFixed(2);
+}
+
+function selectRow(r) {
+  selected.value = r;
+  if (hasXY(r)) {
+    focusXY(r.x, r.y, 9);
+    drawCirclesOnMap([r]);
+  }
+}
+
+function focusSelected() {
+  if (!selected.value || !hasXY(selected.value)) return;
+  focusXY(selected.value.x, selected.value.y, 10);
+}
+
+function drawFilteredOnMap() {
+  drawCirclesOnMap(filteredRows.value.slice(0, 500)); // לא להגזים כדי לא להכביד
+}
+
+function jumpToObjectId() {
+  const id = Number(searchObjectId.value);
+  if (!Number.isFinite(id)) return;
+
+  const r = rows.value.find((x) => x.objectId === id);
+  if (r) {
+    selectRow(r);
+    return;
+  }
+
+  // לא נמצא ב־CSV: נשמור בבחירה ריקה, ותוכל בהמשך להרחיב לתשאול שכבה ע"י API
+  selected.value = {
+    __key: `manual-${id}`,
+    objectId: id,
+    rate: null,
+    obs: null,
+    x: null,
+    y: null,
+    raw: { note: "לא נמצא ב־CSV" },
+  };
+}
+
+async function reloadAll() {
+  busy.value = true;
+  try {
+    await loadCsv();
+    if (!mapReady.value) await initMap();
+    // אחרי טעינה – צייר אוטומטית את ה־Top (אם יש נקודות)
+    setTimeout(() => drawCirclesOnMap(topRows.value.slice(0, 150)), 350);
   } finally {
-    setLoading(false);
+    busy.value = false;
   }
 }
 
-function drawBuildings(fc) {
-  if (!map) return;
+/**
+ * =========================
+ * Auto redraw on threshold changes (throttled)
+ * =========================
+ */
+let redrawTimer = null;
+watch([rateThreshold, minObservations], () => {
+  if (!mapReady.value) return;
+  if (redrawTimer) clearTimeout(redrawTimer);
+  redrawTimer = setTimeout(() => {
+    // אל תצייר ישר אלפי נקודות — נשאיר את זה ידני/Top
+    drawCirclesOnMap(topRows.value.slice(0, 150));
+  }, 350);
+});
 
-  if (buildingsLayer) buildingsLayer.remove();
-
-  buildingsLayer = L().geoJSON(fc, {
-    style: (feature) => {
-      const st = deriveStatsFromProps(feature);
-      const base = styleByStatus(st.status);
-      if (ui.filterSubs) {
-        const show = shouldShowByFilter(st);
-        return { ...base, fillOpacity: show ? 0.35 : 0.0, opacity: show ? 0.95 : 0.0 };
-      }
-      return base;
-    },
-    onEachFeature: (feature, layer) => {
-      layer.on("mouseover", () => {
-        layer.setStyle({ weight: 3, fillOpacity: 0.33 });
-        const st = deriveStatsFromProps(feature);
-        hover.html = tipHtml(st);
-        hover.show = true;
-        requestAnimationFrame(fixTipFlip);
-      });
-
-      layer.on("mousemove", () => {
-        if (hover.show) requestAnimationFrame(fixTipFlip);
-      });
-
-      layer.on("mouseout", () => {
-        buildingsLayer?.resetStyle(layer);
-        hover.show = false;
-      });
-
-      layer.on("click", () => {
-        const st = deriveStatsFromProps(feature);
-        selected.value = { id: buildingId(feature), st, feature };
-      });
-    },
-  }).addTo(map);
-
-  const b = buildingsLayer.getBounds();
-  hasBounds.value = b?.isValid?.() === true;
-  if (hasBounds.value) map.fitBounds(b.pad(0.08));
-}
-
-function recolorAll() {
-  if (!buildingsLayer) return;
-  buildingsLayer.eachLayer((layer) => {
-    const f = layer.feature;
-    if (!f) return;
-    const st = deriveStatsFromProps(f);
-    applyLayerStyle(layer, st);
-  });
-}
-
-function fitToLayer() {
-  if (!buildingsLayer) return;
-  const b = buildingsLayer.getBounds();
-  if (b && b.isValid()) map.fitBounds(b.pad(0.08));
-}
-
-/* ---------- init map + AUTO load ---------- */
+/**
+ * =========================
+ * Mount
+ * =========================
+ */
 onMounted(async () => {
-  map = L().map("map", { zoomControl: true, preferCanvas: true }).setView([32.0853, 34.7818], 16);
-
-  L().tileLayer(
-    "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-    { maxZoom: 20, attribution: "Tiles © Esri" }
-  ).addTo(map);
-
-  L().tileLayer(
-    "https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
-    { maxZoom: 20, opacity: 0.9, attribution: "Labels © Esri" }
-  ).addTo(map);
-
-  window.addEventListener("mousemove", onMouseMove, { passive: true });
-
-  // ✅ AUTO LOAD
-  await loadBuildings();
+  await initMap();
+  await loadCsv();
+  // ציור ראשוני קטן אם יש X/Y
+  setTimeout(() => drawCirclesOnMap(topRows.value.slice(0, 150)), 400);
 });
-
-onBeforeUnmount(() => {
-  window.removeEventListener("mousemove", onMouseMove);
-  if (map) map.remove();
-});
-
-/* אם משנים נתיב — טען אוטומטית בלי כפתור */
-let reloadTimer = null;
-watch(
-  () => paths.buildings,
-  () => {
-    clearTimeout(reloadTimer);
-    reloadTimer = setTimeout(() => {
-      // לא נטען אם המשתמש מחק הכל
-      const u = sanitizeUrl(paths.buildings);
-      if (!u) return;
-      loadBuildings();
-    }, 900);
-  }
-);
-
-/* שינוי ספים / פילטר => רק צביעה מחדש */
-watch(() => ui.filterSubs, () => recolorAll());
-watch(() => [params.thrVel, params.thrCoh, params.minPts], () => recolorAll());
 </script>
 
-<style>
-:root{
-  --bg:#0b1220;
-  --line:#223152;
-  --muted:#9fb0d0;
-  --text:#e8eefc;
-
-  --c-subs:#e24b4b;
-  --c-sus:#f08a24;
-  --c-stable:#2f6fe4;
-  --c-lowq:#9b7bd4;
-  --c-nodata:#93a0b8;
+<style scoped>
+/* Layout */
+.app {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: #f6f7fb;
+  color: #111;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
 }
 
-*{ box-sizing:border-box; }
-html,body,#app{ height:100%; margin:0; }
-body{
-  font-family: system-ui, -apple-system, Segoe UI, Arial, sans-serif;
-  background: var(--bg);
-  color: var(--text);
-  overflow:hidden;
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  background: #ffffff;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
 }
 
-.app{
-  display:grid;
+.brand .title {
+  font-size: 18px;
+  font-weight: 800;
+  line-height: 1.1;
+}
+.brand .sub {
+  font-size: 12px;
+  opacity: 0.75;
+  margin-top: 2px;
+}
+
+.headerBtns {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.body {
+  flex: 1;
+  display: grid;
   grid-template-columns: 380px 1fr;
-  height:100%;
+  min-height: 0;
 }
 
-.panel{
-  background: linear-gradient(180deg, rgba(17,28,52,.96), rgba(13,18,32,.96));
-  border-left:1px solid var(--line);
-  overflow:auto;
-  box-shadow: 0 14px 40px rgba(0,0,0,.32);
+/* Panel */
+.panel {
+  background: #ffffff;
+  border-left: 1px solid rgba(0, 0, 0, 0.08);
+  padding: 10px;
+  overflow: auto;
 }
 
-.panelHeader{
-  display:flex;
-  align-items:center;
-  justify-content:space-between;
-  gap:10px;
-  padding:14px 14px 10px;
-  position:sticky;
-  top:0;
-  background: rgba(15, 23, 42, .92);
-  backdrop-filter: blur(10px);
-  border-bottom:1px solid var(--line);
-  z-index: 5;
+.tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 6px;
+  margin-bottom: 10px;
 }
 
-.brand .title{ font-size:18px; font-weight:900; letter-spacing:.2px; }
-.brand .sub{ font-size:12px; color:var(--muted); margin-top:2px; }
-
-.iconBtn{
-  border:1px solid var(--line);
-  background: rgba(255,255,255,.06);
-  color:var(--text);
-  border-radius:10px;
-  padding:8px 10px;
-  cursor:pointer;
+.tab {
+  padding: 9px 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  background: #fff;
+  cursor: pointer;
+  font-weight: 700;
+  font-size: 12px;
 }
-.iconBtn:hover{ background: rgba(255,255,255,.10); }
-
-.tabs{
-  display:flex;
-  gap:8px;
-  padding:10px 14px 12px;
-  border-bottom:1px solid var(--line);
-}
-.tab{
-  border:1px solid var(--line);
-  background: rgba(255,255,255,.06);
-  color:var(--text);
-  border-radius:999px;
-  padding:8px 12px;
-  cursor:pointer;
-  font-size:13px;
-}
-.tab.on{
-  background: rgba(110,168,254,.18);
-  border-color: rgba(110,168,254,.45);
+.tab.on {
+  background: #111;
+  color: #fff;
+  border-color: #111;
 }
 
-.tabPage{ padding:12px 14px 18px; }
-
-.card{
-  background: rgba(255,255,255,.04);
-  border:1px solid var(--line);
-  border-radius:16px;
-  padding:12px;
-  margin-bottom:12px;
-}
-.cardTitle{
-  font-weight:900;
-  font-size:13px;
-  margin-bottom:10px;
-  color:#f4f7ff;
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
 
-label{ display:block; font-size:12px; color:var(--muted); margin-bottom:6px; }
-input[type="text"], input[type="number"]{
-  width:100%;
-  background: rgba(0,0,0,.22);
-  border:1px solid rgba(255,255,255,.10);
-  color:var(--text);
-  border-radius:12px;
-  padding:10px 10px;
-  outline:none;
-}
-input[type="text"]:focus, input[type="number"]:focus{
-  border-color: rgba(110,168,254,.55);
-  box-shadow: 0 0 0 4px rgba(110,168,254,.12);
+.box {
+  background: #ffffff;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 14px;
+  padding: 10px;
 }
 
-.row2{
-  display:grid;
+.boxTitle {
+  font-weight: 800;
+  margin-bottom: 8px;
+}
+
+.row2 {
+  display: grid;
   grid-template-columns: 1fr 1fr;
-  gap:10px;
-  align-items:end;
-}
-.colSpan2{ grid-column: 1 / -1; }
-
-.rowBtns{
-  display:flex;
-  gap:10px;
-  margin-top:10px;
-}
-.btn{
-  border:none;
-  background: linear-gradient(180deg, rgba(110,168,254,.95), rgba(110,168,254,.78));
-  color:#061024;
-  font-weight:900;
-  border-radius:12px;
-  padding:10px 12px;
-  cursor:pointer;
-  flex:1;
-}
-.btn:hover{ filter: brightness(1.05); }
-.btn:disabled{ opacity:.55; cursor:not-allowed; }
-.btn.ghost{
-  background: rgba(255,255,255,.06);
-  color: var(--text);
-  border:1px solid var(--line);
-}
-.btn.ghost:hover{ background: rgba(255,255,255,.10); }
-
-.hint{ color:var(--muted); font-size:12px; margin-top:8px; line-height:1.35; }
-.hint.mini{ margin-top:6px; font-size:11px; }
-code{ background: rgba(0,0,0,.25); padding:2px 6px; border-radius:8px; }
-
-.check{
-  display:flex;
-  align-items:center;
-  gap:10px;
-  padding:10px 10px;
-  border:1px solid rgba(255,255,255,.08);
-  border-radius:12px;
-  background: rgba(0,0,0,.14);
-  cursor:pointer;
-  user-select:none;
-}
-.check input{ transform: scale(1.1); }
-
-/* ------------ Improved info UI ------------ */
-.emptyState{
-  display:flex;
-  gap:12px;
-  align-items:center;
-  padding:12px;
-  border-radius:14px;
-  background: rgba(0,0,0,.18);
-  border:1px dashed rgba(255,255,255,.12);
-}
-.emptyIcon{
-  width:36px; height:36px;
-  display:grid; place-items:center;
-  border-radius:12px;
-  background: rgba(255,255,255,.06);
-  border:1px solid rgba(255,255,255,.10);
-  font-weight:900;
-}
-.emptyText{ color: var(--muted); font-size:12px; line-height:1.45; }
-
-.infoCard{
-  border-radius:16px;
-  background: rgba(0,0,0,.18);
-  border:1px solid rgba(255,255,255,.10);
-  padding:12px;
-}
-.infoTop{
-  display:flex;
-  justify-content:space-between;
-  gap:10px;
-  align-items:flex-start;
-  margin-bottom:10px;
-}
-.idBlock .idLabel{
-  font-size:11px;
-  color: var(--muted);
-}
-.idBlock .idValue{
-  font-size:15px;
-  font-weight:900;
-  letter-spacing:.2px;
+  gap: 10px;
 }
 
-.badges{
-  display:flex;
-  gap:8px;
-  flex-wrap:wrap;
-  justify-content:flex-end;
-}
-.badge{
-  display:inline-flex;
-  align-items:center;
-  gap:6px;
-  padding:6px 10px;
-  border-radius:999px;
-  font-size:12px;
-  font-weight:900;
-  border:1px solid rgba(255,255,255,.10);
-  background: rgba(255,255,255,.06);
-}
-.badge.ghost{
-  background: rgba(0,0,0,.20);
-  color: var(--muted);
-}
-.b-subsiding{ background: rgba(226,75,75,.18); border-color: rgba(226,75,75,.35); }
-.b-suspect{ background: rgba(240,138,36,.18); border-color: rgba(240,138,36,.35); }
-.b-stable{ background: rgba(47,111,228,.18); border-color: rgba(47,111,228,.35); }
-.b-low_quality{ background: rgba(155,123,212,.18); border-color: rgba(155,123,212,.35); }
-.b-no_data{ background: rgba(147,160,184,.18); border-color: rgba(147,160,184,.35); }
-
-.kvGrid{
-  display:grid;
-  grid-template-columns: 1fr 1fr;
-  gap:10px;
-}
-.kv{
-  background: rgba(255,255,255,.06);
-  border:1px solid rgba(255,255,255,.10);
-  border-radius:14px;
-  padding:10px;
-}
-.kv .k{ font-size:11px; color: var(--muted); }
-.kv .v{ font-size:16px; font-weight:900; margin-top:4px; }
-.kv .u{ font-size:11px; color: var(--muted); margin-top:2px; }
-
-.meterWrap{
-  margin-top:12px;
-  padding:10px;
-  border-radius:14px;
-  background: rgba(255,255,255,.06);
-  border:1px solid rgba(255,255,255,.10);
-}
-.meterTop{
-  display:flex;
-  justify-content:space-between;
-  align-items:baseline;
-  gap:10px;
-  margin-bottom:8px;
-}
-.meterLabel{ font-size:12px; color: var(--muted); }
-.meterValue{ font-weight:900; }
-.meterValue.bad{ color: #ffd1d1; }
-.miniNote{ font-size:11px; color: var(--muted); font-weight:700; margin-right:6px; }
-
-.meter{
-  position:relative;
-  height:10px;
-  border-radius:999px;
-  background: rgba(0,0,0,.25);
-  border:1px solid rgba(255,255,255,.10);
-  overflow:hidden;
-}
-.meterFill{
-  height:100%;
-  background: rgba(110,168,254,.55);
-}
-.meterThr{
-  position:absolute;
-  top:-3px;
-  width:2px;
-  height:16px;
-  background: rgba(255,255,255,.70);
-  box-shadow: 0 0 0 2px rgba(0,0,0,.25);
+label {
+  display: block;
+  font-size: 12px;
+  font-weight: 800;
+  margin-bottom: 6px;
 }
 
-.checks{
-  margin-top:10px;
-  display:flex;
-  flex-direction:column;
-  gap:8px;
-}
-.checkRow{
-  display:flex;
-  align-items:center;
-  gap:10px;
-  padding:8px 10px;
-  border-radius:12px;
-  border:1px solid rgba(255,255,255,.10);
-  background: rgba(0,0,0,.12);
-  font-size:12px;
-  color: var(--muted);
-}
-.checkRow .dot{
-  width:8px; height:8px;
-  border-radius:999px;
-  background: rgba(147,160,184,.9);
-}
-.checkRow.ok{ color:#e8eefc; border-color: rgba(110,168,254,.25); }
-.checkRow.ok .dot{ background: rgba(110,168,254,.95); }
-.checkRow.bad{ color:#ffe6e6; border-color: rgba(226,75,75,.25); }
-.checkRow.bad .dot{ background: rgba(226,75,75,.95); }
-
-.miniExplain{
-  margin-top:10px;
-  color: var(--muted);
-  font-size:11px;
-  line-height:1.35;
-}
-.miniTag{
-  display:inline-block;
-  padding:2px 8px;
-  border-radius:999px;
-  border:1px solid rgba(255,255,255,.10);
-  background: rgba(255,255,255,.06);
-  font-weight:900;
-  margin-left:6px;
+.input {
+  width: 100%;
+  padding: 9px 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(0, 0, 0, 0.16);
+  outline: none;
+  background: #fff;
 }
 
-.statusBox{
-  padding:10px;
-  border-radius:14px;
-  background: rgba(0,0,0,.18);
-  border:1px solid rgba(255,255,255,.10);
-  font-size:12px;
-  line-height:1.45;
-}
-.statusLine{
-  display:flex;
-  align-items:center;
-  gap:10px;
-}
-.statusDot{
-  width:10px; height:10px;
-  border-radius:999px;
-  background: rgba(147,160,184,.7);
-}
-.statusDot.on{
-  background: rgba(110,168,254,.95);
+.inline {
+  display: flex;
+  gap: 8px;
+  align-items: center;
 }
 
-/* legend */
-.legend{ display:flex; flex-direction:column; gap:10px; }
-.legRow{ display:flex; align-items:center; gap:10px; font-size:13px; color:#eaf1ff; }
-.sw{ width:16px; height:16px; border-radius:6px; border:1px solid rgba(255,255,255,.18); }
-.s-subs{ background: var(--c-subs); }
-.s-sus{ background: var(--c-sus); }
-.s-stable{ background: var(--c-stable); }
-.s-lowq{ background: var(--c-lowq); }
-.s-nodata{ background: var(--c-nodata); }
-
-.p{ color:#d9e6ff; font-size:13px; line-height:1.55; }
-.ul{ margin:8px 0 0 0; padding-right:18px; color:#d9e6ff; }
-
-/* map */
-.mapWrap{ position:relative; }
-#map{ width:100%; height:100%; }
-
-.topRight{
-  position:absolute;
-  top:12px;
-  left:12px;
-  z-index: 500;
-}
-.pill{
-  background: rgba(15, 23, 42, .85);
-  border:1px solid rgba(255,255,255,.10);
-  border-radius:999px;
-  padding:8px 12px;
-  font-size:12px;
-  color: var(--muted);
-  backdrop-filter: blur(10px);
+.hint {
+  font-size: 12px;
+  opacity: 0.75;
+  margin-top: 6px;
+  line-height: 1.25;
 }
 
-/* Tooltip */
-.hoverTip{
-  position: fixed;
-  z-index: 2000;
-  pointer-events: none;
-  background: rgba(10, 14, 24, .92);
-  border: 1px solid rgba(255,255,255,.12);
+.stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.pill {
+  background: #f6f7fb;
   border-radius: 12px;
   padding: 8px 10px;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+}
+.pill .k {
+  font-size: 11px;
+  opacity: 0.7;
+}
+.pill .v {
+  font-weight: 900;
+  margin-top: 2px;
+}
+
+/* List */
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 420px;
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.listItem {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  text-align: right;
+  padding: 9px 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  background: #fff;
+  cursor: pointer;
+}
+.listItem:hover {
+  background: #f6f7fb;
+}
+.listItem.active {
+  border-color: rgba(0, 0, 0, 0.35);
+  background: #f0f2ff;
+}
+
+.liTitle {
   font-size: 12px;
-  color: #eef4ff;
-  box-shadow: 0 12px 30px rgba(0,0,0,.35);
-  white-space: nowrap;
 }
-.tipRow{
-  display:flex;
-  align-items:center;
-  gap:10px;
+.liSub {
+  font-size: 12px;
+  opacity: 0.8;
+  margin-top: 2px;
 }
-.tipK{ color: rgba(255,255,255,.70); font-weight:800; font-size:11px; }
-.tipV{ color:#eef4ff; font-weight:900; }
-.tipBadge{
-  padding:4px 10px;
-  border-radius:999px;
-  border:1px solid rgba(255,255,255,.10);
-  font-weight:900;
-  font-size:11px;
-  margin-left:4px;
+.liRight {
+  font-weight: 900;
+  opacity: 0.6;
 }
-.t-subsiding{ background: rgba(226,75,75,.18); border-color: rgba(226,75,75,.35); }
-.t-suspect{ background: rgba(240,138,36,.18); border-color: rgba(240,138,36,.35); }
-.t-stable{ background: rgba(47,111,228,.18); border-color: rgba(47,111,228,.35); }
-.t-low_quality{ background: rgba(155,123,212,.18); border-color: rgba(155,123,212,.35); }
-.t-no_data{ background: rgba(147,160,184,.18); border-color: rgba(147,160,184,.35); }
 
-/* Loader */
-.loader{
-  position:absolute;
-  inset:0;
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  flex-direction:column;
-  gap:10px;
-  background: rgba(0,0,0,.35);
-  z-index: 1200;
+.empty {
+  font-size: 13px;
+  opacity: 0.75;
+  padding: 8px 2px;
 }
-.spin{
-  width:34px; height:34px;
-  border-radius:50%;
-  border: 4px solid rgba(255,255,255,.18);
-  border-top-color: rgba(255,255,255,.75);
-  animation: spin 1s linear infinite;
-}
-@keyframes spin { to { transform: rotate(360deg); } }
-.loader .txt{ color:#eaf1ff; font-weight:900; }
 
-/* responsive panel */
-@media (max-width: 980px){
-  .app{ grid-template-columns: 1fr; }
-  .panel{
-    position:absolute;
-    right:0; top:0; bottom:0;
-    width:min(420px, 92vw);
-    transform: translateX(0);
-    transition: transform .2s ease;
-    z-index: 1000;
+.kv {
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  gap: 10px;
+  padding: 6px 0;
+  border-bottom: 1px dashed rgba(0, 0, 0, 0.12);
+}
+.kv:last-child {
+  border-bottom: 0;
+}
+.kv .k {
+  font-weight: 900;
+  font-size: 12px;
+  opacity: 0.8;
+}
+.kv .v {
+  font-size: 13px;
+}
+
+.actions {
+  margin-top: 10px;
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.raw {
+  margin-top: 10px;
+}
+.raw pre {
+  background: #0b1020;
+  color: #e8eefc;
+  padding: 10px;
+  border-radius: 10px;
+  overflow: auto;
+  max-height: 220px;
+}
+
+/* Buttons */
+.btn {
+  padding: 9px 12px;
+  border-radius: 12px;
+  border: 1px solid #111;
+  background: #111;
+  color: #fff;
+  font-weight: 900;
+  cursor: pointer;
+}
+.btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.btn.ghost {
+  background: #fff;
+  color: #111;
+}
+
+/* Map */
+.mapWrap {
+  position: relative;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.mapTopBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  background: #ffffff;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+}
+
+.mapStatus {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 800;
+  font-size: 12px;
+}
+.dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #c5c7d0;
+}
+.dot.ok {
+  background: #3cb371;
+}
+.err {
+  color: #b00020;
+  font-weight: 900;
+}
+
+.mapBtns {
+  display: flex;
+  gap: 10px;
+}
+
+.map {
+  flex: 1;
+  min-height: 0;
+  background: #e9ecf5;
+}
+
+.mapHint {
+  position: absolute;
+  bottom: 10px;
+  left: 10px;
+  right: 10px;
+  max-width: 840px;
+  margin: 0 auto;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  border-radius: 12px;
+  font-size: 12px;
+  opacity: 0.9;
+}
+
+/* Observations/About text */
+.p {
+  font-size: 13px;
+  line-height: 1.35;
+  margin-bottom: 8px;
+}
+.ul {
+  margin: 0;
+  padding-right: 18px;
+}
+.ul li {
+  margin: 6px 0;
+  font-size: 13px;
+}
+
+/* Mobile */
+@media (max-width: 980px) {
+  .body {
+    grid-template-columns: 1fr;
   }
-  .panel.closed{ transform: translateX(105%); }
+  .panel {
+    position: fixed;
+    top: 56px;
+    right: 0;
+    bottom: 0;
+    width: min(92vw, 420px);
+    transform: translateX(105%);
+    transition: transform 0.2s ease;
+    z-index: 5;
+    box-shadow: -20px 0 50px rgba(0, 0, 0, 0.15);
+  }
+  .panel.open {
+    transform: translateX(0%);
+  }
 }
 </style>

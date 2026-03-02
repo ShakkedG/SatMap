@@ -3,6 +3,9 @@ name: Deploy Client to GitHub Pages
 on:
   push:
     branches: ["main"]
+    paths:
+      - "client/**"
+      - ".github/workflows/pages.yml"
   workflow_dispatch:
 
 permissions:
@@ -18,19 +21,49 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: 20
+      - name: Normalize App.vue (strip BOM + CRLF)
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path("client/src/App.vue")
+          b = p.read_bytes()
+          if b.startswith(b"\xef\xbb\xbf"):
+              b = b[3:]
+              print("Stripped UTF-8 BOM")
+          # normalize CRLF -> LF
+          b = b.replace(b"\r\n", b"\n")
+          p.write_bytes(b)
+          print("Normalized line endings")
+          PY
 
-      - name: Install
+          
+      - name: Debug App.vue
+        run: |
+          echo "===== ls client/src ====="
+          ls -la client/src || true
+          echo "===== first 30 lines of client/src/App.vue ====="
+          sed -n '1,30p' client/src/App.vue || true
+
+
+      - name: Install dependencies
         working-directory: client
-        run: npm install --no-fund --no-audit
+        run: npm install --no-audit --no-fund
 
       - name: Build
         working-directory: client
+        env:
+          VITE_GOVMAP_TOKEN: ${{ secrets.VITE_GOVMAP_TOKEN }}
         run: npm run build
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
@@ -44,5 +77,6 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - id: deployment
+      - name: Deploy to GitHub Pages
+        id: deployment
         uses: actions/deploy-pages@v4
