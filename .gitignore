@@ -14,3 +14,41 @@ client/dist/
 .idea/
 .DS_Store
 Thumbs.db
+# -----------------------------
+# SatMap Pipeline (heavy data)
+# -----------------------------
+
+# keep folders but ignore their contents
+pipeline/data/*
+!pipeline/data/.gitkeep
+
+pipeline/exports/*
+!pipeline/exports/.gitkeep
+
+pipeline/tmp/*
+!pipeline/tmp/.gitkeep
+
+# heavy geospatial / raster
+*.tif
+*.tiff
+*.vrt
+*.nc
+*.h5
+*.SAFE/
+*.zip
+*.7z
+
+# tiles
+*.pmtiles
+*.mbtiles
+
+# geopackage journals
+*.gpkg-journal
+
+# logs
+*.log
+client/public/tiles/*.pmtiles
+*.pmtiles
+*.mbtiles
+
+
