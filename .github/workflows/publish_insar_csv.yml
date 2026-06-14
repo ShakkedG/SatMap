@@ -1,0 +1,45 @@
+name: Publish InSAR buildings CSV
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "20 * * * *"   # פעם בשעה
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps
+        run: pip install requests rasterio shapely pyproj
+
+      - name: Build insar_buildings.csv from GovMap + HyP3
+        run: python pipeline/publish_insar_buildings_csv.py
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          AOI_WKT: ${{ secrets.AOI_WKT }}
+          GOVMAP_QUERY_URL: ${{ secrets.GOVMAP_QUERY_URL }}
+          GOVMAP_TOKEN: ${{ secrets.GOVMAP_TOKEN }}
+          OUT_CSV: client/public/insar_buildings.csv
+          MAX_BUILDINGS: "20000"   # תתחיל קטן ותעלה
+
+      - name: Commit CSV if changed
+        run: |
+          if [[ -n "$(git status --porcelain client/public/insar_buildings.csv)" ]]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add client/public/insar_buildings.csv
+            git commit -m "Update insar_buildings.csv"
+            git push
+          else
+            echo "No changes"
+          fi
