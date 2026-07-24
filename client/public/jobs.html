@@ -1,0 +1,326 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>SatMap – HyP3 Jobs</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        margin: 16px;
+        background: #fafafa;
+      }
+      .top {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        align-items: baseline;
+      }
+      .pill {
+        border: 1px solid #ddd;
+        padding: 4px 10px;
+        border-radius: 999px;
+        background: #fff;
+        font-size: 13px;
+      }
+      .controls {
+        margin: 12px 0;
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+        align-items: center;
+      }
+      input {
+        padding: 8px 10px;
+        width: 360px;
+        max-width: 100%;
+        border: 1px solid #ddd;
+        border-radius: 10px;
+        background: #fff;
+      }
+      button {
+        padding: 8px 12px;
+        border: 1px solid #ddd;
+        border-radius: 10px;
+        background: #fff;
+        cursor: pointer;
+      }
+      button:hover {
+        background: #f2f2f2;
+      }
+      .row {
+        background: #fff;
+        border: 1px solid #eee;
+        border-radius: 12px;
+        padding: 12px;
+        margin: 10px 0;
+      }
+      .meta {
+        color: #666;
+        font-size: 13px;
+        margin-top: 6px;
+        white-space: pre-wrap;
+      }
+      .mono {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        font-size: 12px;
+      }
+      .status {
+        font-weight: 700;
+      }
+      .status.succeeded { }
+      .status.failed { }
+      .status.running { }
+      .status.queued { }
+      .links {
+        margin-top: 8px;
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+      .links a {
+        display: inline-block;
+        padding: 6px 10px;
+        border: 1px solid #ddd;
+        border-radius: 10px;
+        text-decoration: none;
+        color: inherit;
+        background: #fff;
+      }
+      .links a:hover {
+        background: #f2f2f2;
+      }
+      details.files {
+        margin-top: 10px;
+        font-size: 13px;
+      }
+      .small {
+        font-size: 12px;
+        color: #666;
+      }
+      .errorBox {
+        background: #fff3f3;
+        border: 1px solid #ffd0d0;
+        border-radius: 12px;
+        padding: 12px;
+        margin-top: 12px;
+        color: #7a0000;
+      }
+      .okBox {
+        background: #f3fff6;
+        border: 1px solid #cfeeda;
+        border-radius: 12px;
+        padding: 10px 12px;
+        margin-top: 12px;
+        color: #135a2a;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="top">
+      <h2 style="margin: 0">HyP3 Jobs</h2>
+      <span id="updated" class="pill">טוען…</span>
+      <span id="counts" class="pill">—</span>
+      <span id="source" class="pill">—</span>
+    </div>
+
+    <div class="controls">
+      <input id="q" placeholder="סינון לפי pair_key / job_id / status / product…" />
+      <button id="refresh">רענון</button>
+      <button id="openJson">פתח JSON</button>
+    </div>
+
+    <div id="msg"></div>
+    <div id="list"></div>
+
+    <script>
+      function $(id) { return document.getElementById(id); }
+
+      function buildCandidates() {
+        // Candidates to locate hyp3_jobs.json in GitHub Pages / different publish layouts
+        const here = new URL(window.location.href);
+
+        // same folder as jobs.html
+        const c1 = new URL("hyp3_jobs.json", here).toString();
+
+        // site root (/repo/...)
+        const root = new URL(window.location.origin + window.location.pathname);
+        // normalize: keep /<repo>/ prefix if present
+        // E.g. /myrepo/jobs.html -> basePrefix = /myrepo/
+        const path = window.location.pathname;
+        const parts = path.split("/").filter(Boolean);
+        const basePrefix = parts.length ? `/${parts[0]}/` : "/"; // first segment is repo name on gh-pages
+        const c2 = window.location.origin + basePrefix + "hyp3_jobs.json";
+
+        // common built output locations (if you publish dist or client)
+        const c3 = window.location.origin + basePrefix + "client/public/hyp3_jobs.json";
+        const c4 = window.location.origin + basePrefix + "client/hyp3_jobs.json";
+        const c5 = window.location.origin + basePrefix + "dist/hyp3_jobs.json";
+
+        // de-duplicate
+        const uniq = [];
+        for (const u of [c1, c2, c3, c4, c5]) {
+          if (!uniq.includes(u)) uniq.push(u);
+        }
+        return uniq;
+      }
+
+      async function fetchFirstOk(urls) {
+        const tried = [];
+        for (const u of urls) {
+          tried.push(u);
+          try {
+            const r = await fetch(u, { cache: "no-store" });
+            if (r.ok) {
+              const data = await r.json();
+              return { data, sourceUrl: u, tried };
+            }
+            console.warn("Not found:", u, r.status);
+          } catch (e) {
+            console.warn("Fetch error:", u, e);
+          }
+        }
+        return { data: null, sourceUrl: null, tried };
+      }
+
+      function jobMatches(j, q) {
+        if (!q) return true;
+        q = q.toLowerCase();
+        return (
+          (j.job_id || "").toLowerCase().includes(q) ||
+          (j.pair_key || "").toLowerCase().includes(q) ||
+          (j.status || "").toLowerCase().includes(q) ||
+          (j.product_type || "").toLowerCase().includes(q)
+        );
+      }
+
+      function safeStr(v) { return (v === null || v === undefined) ? "" : String(v); }
+
+      function render(data, q) {
+        $("updated").textContent = "עודכן: " + safeStr(data.generated_at);
+        $("counts").textContent = "סיכום: " + JSON.stringify(data.counts || {});
+        const list = $("list");
+        list.innerHTML = "";
+
+        const jobs = (data.jobs || []).filter(j => jobMatches(j, q));
+
+        for (const j of jobs) {
+          const row = document.createElement("div");
+          row.className = "row";
+
+          const s = (j.status || "unknown").toLowerCase();
+
+          const title = document.createElement("div");
+          title.innerHTML = `<span class="status ${s}">${s}</span> • <b>${safeStr(j.product_type)}</b>`;
+          row.appendChild(title);
+
+          const meta = document.createElement("div");
+          meta.className = "meta mono";
+          meta.textContent =
+            `job_id: ${safeStr(j.job_id)}\n` +
+            `pair_key: ${safeStr(j.pair_key)}\n` +
+            `submitted: ${safeStr(j.submitted_at)}\n` +
+            `updated: ${safeStr(j.updated_at)}`;
+          row.appendChild(meta);
+
+          const links = document.createElement("div");
+          links.className = "links";
+
+          if (j.download_zip) {
+            const a = document.createElement("a");
+            a.href = j.download_zip;
+            a.target = "_blank";
+            a.rel = "noopener";
+            a.textContent = "Download ZIP";
+            links.appendChild(a);
+          }
+          if (j.browse) {
+            const a = document.createElement("a");
+            a.href = j.browse;
+            a.target = "_blank";
+            a.rel = "noopener";
+            a.textContent = "Browse";
+            links.appendChild(a);
+          }
+
+          if (links.childNodes.length) row.appendChild(links);
+
+          if (Array.isArray(j.files) && j.files.length) {
+            const details = document.createElement("details");
+            details.className = "files";
+            const summary = document.createElement("summary");
+            summary.textContent = `Files (${j.files.length})`;
+            details.appendChild(summary);
+
+            const ul = document.createElement("ul");
+            for (const f of j.files) {
+              const li = document.createElement("li");
+              const a = document.createElement("a");
+              a.href = f.url;
+              a.target = "_blank";
+              a.rel = "noopener";
+              a.textContent = f.name || f.url;
+              li.appendChild(a);
+              ul.appendChild(li);
+            }
+            details.appendChild(ul);
+            row.appendChild(details);
+          }
+
+          list.appendChild(row);
+        }
+
+        if (!jobs.length) {
+          const empty = document.createElement("div");
+          empty.className = "errorBox";
+          empty.textContent = "אין תוצאות (או שהחיפוש סינן הכול).";
+          list.appendChild(empty);
+        }
+      }
+
+      async function main() {
+        const candidates = buildCandidates();
+        const { data, sourceUrl, tried } = await fetchFirstOk(candidates);
+
+        $("openJson").addEventListener("click", () => {
+          const u = sourceUrl || candidates[0];
+          window.open(u, "_blank", "noopener");
+        });
+
+        $("refresh").addEventListener("click", () => location.reload());
+
+        if (!data) {
+          $("msg").innerHTML = `
+            <div class="errorBox">
+              <div><b>לא הצלחתי לטעון hyp3_jobs.json</b></div>
+              <div class="small">ניסיתי את הנתיבים הבאים:</div>
+              <ul class="mono">
+                ${tried.map(u => `<li>${u}</li>`).join("")}
+              </ul>
+              <div class="small">
+                טיפ: ודא שהקובץ <span class="mono">hyp3_jobs.json</span> נמצא באותה תיקייה כמו <span class="mono">jobs.html</span> ב-Pages (בדרך כלל שורש האתר).
+              </div>
+            </div>
+          `;
+          $("updated").textContent = "שגיאה";
+          $("counts").textContent = "—";
+          $("source").textContent = "source: not found";
+          return;
+        }
+
+        $("msg").innerHTML = `<div class="okBox">נטען בהצלחה ✅</div>`;
+        $("source").textContent = "source: " + sourceUrl;
+
+        const qEl = $("q");
+        render(data, qEl.value);
+
+        qEl.addEventListener("input", () => render(data, qEl.value));
+      }
+
+      main().catch(err => {
+        $("msg").innerHTML = `<div class="errorBox">שגיאה: ${err}</div>`;
+        $("updated").textContent = "שגיאה";
+      });
+    </script>
+  </body>
+</html>
