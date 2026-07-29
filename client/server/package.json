@@ -1,0 +1,13 @@
+{
+  "name": "satmap-tiles-server",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "@mapbox/mbtiles": "^0.12.1",
+    "express": "^4.19.2"
+  }
+}
